@@ -1,0 +1,5 @@
+md5	group	path	extension	mimetype	status
+f4735905c38f9b1d5fb4ca84643b61d3	testfolder	LICENSE.mp3	mp3	text/plain	mp3: File extension not allowed
+ae9120835f658f1ae57e5754811a9475	secondfolder	file_example_MP3_1MG.txt	txt	audio/mpeg	audio/mpeg: File format not allowed
+b3824a96b4240d6b47f091546b152cab	secondfolder	error_t.tar.bz2	bz2	application/x-bzip2	Invalid bz2 file. Please remove inner audio and/or video files
+d41d8cd98f00b204e9800998ecf8427e	secondfolder	another_err.zip	zip	application/zip	Invalid zip file. Please remove inner audio and/or video files

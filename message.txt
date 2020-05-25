@@ -1,0 +1,13 @@
+Dear ${PERSON_NAME}, 
+
+Some of the contents uploaded into your group folder are suspicious and/or inappropriate.
+
+Please, delete them or send us an email to support.ipc-project@bsc.es in case they are valid.
+
+Files:
+
+${FILES_LIST}
+
+Best regards,
+
+iPC Nextcloud Team
