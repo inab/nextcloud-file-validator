@@ -132,7 +132,8 @@ def optimized_md5(fname):
 def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
        z.extractall(dest)
-    
+    print "path to real extraction folder: ", dest
+    print "Extracted files: ", z.namelist()
     return z.namelist()
 
 def extractTar(filename, dest):
@@ -176,22 +177,21 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
     if(filetype == "zip-kind"):
         print "zip-kind extraction"
         print "zip-kind path: ", filename
-        # Setting child zip files extraction path.
-        prefix = dest + "/zip"
+        print "Extraction destination: ", dest
         # Getting child zip filenames. Relative to initial zip file folder name.
-        names = extractZip(filename, prefix)
+        names = extractZip(filename, dest)
         # Activating child files trigger.
         multiple = True
     elif(filetype == "tar-kind"):
         print "tar-kind extraction"
         print "tar-kind path: ", filename
-        # Setting child tar files extraction path.
-        prefix = dest + "/tar"
+        print "Extraction destination: ", dest
         # Getting child tar filenames. Relative to initial tar file folder name.
-        names = extractTar(filename, prefix)
+        names = extractTar(filename, dest)
+        print names
         # Activating child files trigger.
         multiple = True
-
+        
     mime = magic.Magic(mime=True)
 
     # Initial condition: Only 1 element. Child zip/tar: Multiple elements (multiple==True).
@@ -203,7 +203,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
         inner=False
         # multiple=True: Build FS absolute path for each of the extracted files.
         if(multiple):
-            array = [prefix, f]
+            array = [dest, f]
             path = "/".join(array)
             print "Final file path: ", path
             inner=True
@@ -211,9 +211,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
         if(os.path.isfile(path)):
             # Initialise invalid files trigger to False.
             invalid=False
-
             # START ANALYSIS: Extension and Mimetype.
-
             # a) Get mimetype:
             mimetype = mime.from_file(path)
             # b) Get file extension:
@@ -238,6 +236,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                 invalid = True
                 status = "%s: File format not allowed" % mimetype
             # Check if it is a zip file, only for valid extensions. Avoid xlsx (mimetype=application/zip).
+            # TODO III: CREATE CHILDGENERATOR FN ON BOTH ZIP/TAR FILES.
             elif (mimetype == "application/zip" and not extension == "xlsx"):
                 print "zip-kind"
                 status = "%s: zip-kind file:" % mimetype 
@@ -253,16 +252,19 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                     # File related to root folder (root=True).
                     # We use the FS absolute path to the group folder file.
                     root = True
+                    root_filename = path.split("/")[-1]
+                    root_extractfolder = root_filename.split(".")[0]
                     # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((f, filetype)))
+                    childList.append(tuple((f, filetype, dest + "/zip/" + root_extractfolder)))
                     print "childList: ADD ZIP PARENT -> ", childList
                 else:
                     # If multiple, root=False, as it is a child zip file.
                     print "Zip Child path: ", path
+                    child_extractfolder = path.split(".")[0]
                     # We exclude zip/tar elements to be included in the whitelist.
                     exclude = True
                     # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((path, filetype)))
+                    childList.append(tuple((path, filetype, child_extractfolder)))
                     print "childList: ADD ZIP CHILD -> ", childList  
 
             elif (mimetype == "application/x-tar" or mimetype == "application/x-compressed" 
@@ -280,20 +282,22 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                     # File related to root folder (root=True).
                     # We use the FS absolute path to the group folder file.
                     root = True
-                    # We exclude zip/tar elements to be included in the whitelist.
-                    exclude = True
+                    root_filename = path.split("/")[-1]
+                    root_extractfolder = root_filename.split(".")[0]
                     # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((f, filetype)))
+                    childList.append(tuple((f, filetype, dest + "/tar/" + root_extractfolder)))
                     print "childList: ADD TAR PARENT -> ", childList
                 else:
-                    # If multiple, root=False, as it is a child tar file.
+                   # If multiple, root=False, as it is a child zip file.
                     print "Tar Child path: ", path
+                    child_extractfolder = path.split(".")[0]
                     # We exclude zip/tar elements to be included in the whitelist.
                     exclude = True
                     # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((path, filetype)))
-                    print "childList: ADD TAR CHILD -> ", childList
-                    # TODO III: ADD THIS MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
+                    childList.append(tuple((path, filetype, child_extractfolder)))
+                    print "childList: ADD TAR CHILD -> ", childList 
+
+                    # TODO IV: ADD THIS MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
                     # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
 
             print "invalid: ", invalid
@@ -322,12 +326,12 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
             # a. invalid files from extracted zip/tar, excluding zip/tar elements.
             if(invalid and inner):
                 print "invalid and inner"
-                return [False, status, wl_child, path]           
+                return [False, status, wl_child, path]      
 
     if(len(childList) != 0):
         print "STARTING CHILD EXTRACTION"
         print childList[0]
-        return analyseFiles(childList[0][0], dest, childList[1:], childList[0][1], inner, wl_child)
+        return analyseFiles(childList[0][0], childList[0][2], childList[1:], childList[0][1], inner, wl_child)
     else:
         return [True]
 
@@ -418,6 +422,7 @@ def main():
             for relative_file in files:
                 ## Get absolute path from relative ones.
                 abs_file = os.path.abspath(os.path.join(ref, relative_file))
+                print abs_file
                 # Get md5 from selected file.
                 file_md5 = optimized_md5(abs_file)
                 # JSON Object with file_md5 (key) : set(['path']) (value)
@@ -432,7 +437,6 @@ def main():
 
     # Open whitelist and load md5 into memory.
     md5_checked = read_whitelist(args.white)
-
     # II.b. Analyze mimetypes for all the elements of files_path_md5.
 
     file_blacklist = []
@@ -463,23 +467,31 @@ def main():
                 
                 if(len(result) == 1):
                     print "All files are good: len == 1"
-                    #Adding md5 of parent zip/tar if it's valid.
+                    # Adding md5 of parent zip/tar if it's valid. 
                     file_whitelist.append(md5)
+                    # TODO V: REMOVE EXTRACTED FILES FROM FS IF THEY ARE VALID.
+                # TODO VI: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
+                # THE SAME -> FN.
                 elif(len(result) == 4):
                     print "Wrong file detected"
                     print "Adding md5 files into whitelist"
                     for md5 in result[2]:
                         print md5
                         # Adding md5 of valid child files, when parent zip/tar is invalid.
-                        # In order to skip analysis step. This should be implemented within
+                        # In order to skip further analysis step. This should be implemented within
                         # analyseFiles fn (load whitelist into this fn and check matches 
                         # between current md5 list and generated child zip/tar md5 )
                         file_whitelist.append(md5)
                     
-                    # TODO IV: ADD SOMETHING HERE WITH STATUS AND PATH FOR CHILD INVALID FILES.
+                    # HERE WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL CORRUPT CHILD FILE STATUS IS VALID. 
+                    # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN.
+                    
+                    
+                    # TODO VII: ADD SOMETHING HERE WITH STATUS AND PATH FOR CHILD INVALID FILES.
                     # WE STILL HAVE ISSUES WITH REAL PATH RECONSTRUCTION FOR EXTRACTED CHILD FILES.
-
+                    # (DIFFICULT TASK -> LOGIC INSIDE ANALYSEFILES FN WOULD BE DIFFERENT)
                 
+                    
                     # FOR NOW, WE ONLY REGISTER ROOT FILE FEATURES (MD5,...) INTO BLACKLIST. 
                     
                     # If invalid mimetype or extension, process data for sending an email to 
@@ -491,7 +503,7 @@ def main():
                     # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
                     # UI group folder name.
                     
-                    # TODO V: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
+                    # TODO VIII: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
                     # EXTRACT GROUP FOLDER NAME FROM PATH AND COMPARE WITH MYCONTACTS.TXT FOR
                     # ASSIGNING A NEXTCLOUD FOLDER NAME ("TESTFOLDER", ...)
                     if(gf_element == "1"):
@@ -539,8 +551,6 @@ def main():
                                             "status" : result[1]
                     })
 
-    # TODO VI: REMOVE ALREADY CHECKED EXTRACTED FILES. 
-
     # Updating whitelist (already analised files) adding new Valid files.
     update_whitelist(args.white, file_whitelist)
 
@@ -566,8 +576,8 @@ def main():
     s.starttls()
     s.login(USER, PASSWORD)
 
-    # TODO VII: BUILD A FUNCTION FOR EMAIL SENDING.
-    # TODO VIII: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
+    # TODO IX: BUILD A FUNCTION FOR EMAIL SENDING.
+    # TODO X: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
     # For each contact (group folder admin), send an specific email:
     for name, email, group in zip(name, email, group):
         user_file_str = ""
