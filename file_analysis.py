@@ -21,6 +21,8 @@ import csv
 import tarfile
 from zipfile import ZipFile
 import tarfile
+import gzip
+import shutil
 
 # II.a. Define blacklisted extensions and mimetypes and read the whitelist 
 # (valid analysed files)
@@ -151,16 +153,16 @@ def extractTar(filename, dest):
         return tar.getnames()
 
 def getExtension(filename):
-    extension = filename.rsplit('.', 1)
+    extension = filename.rsplit('.')
     if(len(extension) == 1):
         extension = ""
     elif(len(extension) > 1):
     # We take the last two elements. Useful for tar.gz & tar.bz2
         dummy_ext = ".".join(extension[-2:])
-        if(extension == "tar.gz" or extension == "tar.bz2"):
+        if(dummy_ext == "tar.gz" or dummy_ext == "tar.bz2"):
             extension = dummy_ext
         else:
-            extension = extension[-1]
+            extension = dummy_ext[-1]
     return extension
 
 # Recursively unzip/untar all files and analyse them. In case is not zip/tar, analyse them too.
@@ -188,6 +190,17 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
         print "Extraction destination: ", dest
         # Getting child tar filenames. Relative to initial tar file folder name.
         names = extractTar(filename, dest)
+        print names
+        # Activating child files trigger.
+        multiple = True
+    elif(filetype == "gzip-kind"):
+        print "gzip-kind extraction"
+        print "gzip-kind path: ", filename
+        print "Extraction destination: ", dest
+        # Extract gzip. In this case, just one file. Not tar.
+        extractGzip(filename, dest)
+        # We take the path to the extracted file.
+        names = dest
         print names
         # Activating child files trigger.
         multiple = True
@@ -305,7 +318,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
             print "root: ", root
 
             # This includes:
-            # a. childList extracted files which are valid and they are not zip/tar files.
+            # a. childList extracted files which are valid and they are not zip/tar/gzip files.
             if(not invalid and inner and not root and not exclude):
                 print "not invalid and inner and not root"
                 file_md5 = optimized_md5(path)
@@ -323,7 +336,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                 return [False, status]
 
             # This includes: 
-            # a. invalid files from extracted zip/tar, excluding zip/tar elements.
+            # a. invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
             if(invalid and inner):
                 print "invalid and inner"
                 return [False, status, wl_child, path]      
@@ -331,6 +344,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
     if(len(childList) != 0):
         print "STARTING CHILD EXTRACTION"
         print childList[0]
+        #raw_input()
         return analyseFiles(childList[0][0], childList[0][2], childList[1:], childList[0][1], inner, wl_child)
     else:
         return [True]
@@ -422,7 +436,6 @@ def main():
             for relative_file in files:
                 ## Get absolute path from relative ones.
                 abs_file = os.path.abspath(os.path.join(ref, relative_file))
-                print abs_file
                 # Get md5 from selected file.
                 file_md5 = optimized_md5(abs_file)
                 # JSON Object with file_md5 (key) : set(['path']) (value)
