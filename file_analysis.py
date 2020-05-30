@@ -179,33 +179,71 @@ def getExtension(filename):
             extension = extension[-1]
     return extension
 
-# Recursively unzip/untar all files and analyse them. In case is not zip/tar, analyse them too.
-def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
-    # TODO I: ADD FOR : CURRENT MD5 WHITELIST VS CURRENT MD5 ZIP/TAR CHILD. AVOID EXTRACTION STEP. 
+def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
+    # Check if this file comes from the root group folder. Not extracted yet.
+    if(len(nodeList) == 0):
+        nodeList = []
+
+    if(not multiple):
+        #print ("%s Parent path: %s" % filetype, absPath)
+        # File related to root folder (root=True).
+        # We use the FS absolute path to the group folder file.
+
+        root_filename = relPath.split("/")[-1]
+
+        if(filetype == "gzip-kind"):
+            suffix = root_filename.split(".")[:-1]
+            suffix = ".".join(suffix)
+        else:
+            suffix = root_filename.split(".")[0]
+        
+        # Add the element to nodeList queue, in order to be extracted.
+        # Extraction path: prefix + /filetype/ + suffix
+        nodeList.append(tuple((absPath, filetype, prefix + "/" + filetype + "/" + suffix)))
+        #print ("ADDING %s PARENT -> %s" % filetype, nodeList[-1])
+    else:
+        # If multiple, root=False, as it is a child zip/tar/gzip file.
+        #print ("%s Child path: %s" % filetype, relPath)
+
+        if(filetype == "gzip-kind"):
+            suffix = relPath.split(".")[:-1]
+            suffix = ".".join(suffix)
+        else:
+            suffix = relPath.split(".")[0]
+
+        # Add the element to nodeList queue, in order to be extracted.
+        nodeList.append(tuple((relPath, filetype, suffix)))
+        #print ("ADDING %s CHILD -> %s" % filetype, nodeList[-1])
+                
+    return nodeList
+
+# Recursively unzip/untar/ungzip all files and analyse them. In case is not zip/tar/unzip, analyse them too.
+def analyseFiles(filename, dest, nodeList, filetype, inner, wl_child):
+    # TODO I: ADD FOR : CURRENT MD5 WHITELIST VS CURRENT MD5 ZIP/TAR/GZIP CHILD AVOID EXTRACTION STEP. 
     names, path = [filename], filename   
     # Inner fn parameter: Triggers analyseFiles recursivity. 
-    # Only if zip/tar files are present in the current group folder.
-    # Initialise child zip/tar trigger to False.
+    # Only if zip/tar/gzip files are present in the current group folder.
+    # Initialise node zip/tar/gzip trigger to False.
     multiple = False
-    # This condition is not fulfilled with the initial filetype. Only child zip/tar files.
+    # This condition is not fulfilled with the initial filetype. Only node zip/tar/gzip files.
     # Initial filetype="seed".
-    # TODO II: ADD GZ, BZ2 (WITHOUT TAR.X) AND GZIP, TBZ2, TGZ (READ/EXTRACT FUNCTIONS). 
+    # TODO II: ADD BZ2 (WITHOUT TAR.X), TBZ2, TGZ (READ/EXTRACT FUNCTIONS). 
     if(filetype == "zip-kind"):
         print "zip-kind extraction"
         print "zip-kind path: ", filename
         print "Extraction destination: ", dest
-        # Getting child zip filenames. Relative to initial zip file folder name.
+        # Getting node zip filenames. Relative to initial zip file folder name.
         names = extractZip(filename, dest)
-        # Activating child files trigger.
+        # Activating node files trigger.
         multiple = True
     elif(filetype == "tar-kind"):
         print "tar-kind extraction"
         print "tar-kind path: ", filename
         print "Extraction destination: ", dest
-        # Getting child tar filenames. Relative to initial tar file folder name.
+        # Getting node tar filenames. Relative to initial tar file folder name.
         names = extractTar(filename, dest)
         print names
-        # Activating child files trigger.
+        # Activating node files trigger.
         multiple = True
     elif(filetype == "gzip-kind"):
         print "gzip-kind extraction"
@@ -215,18 +253,17 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
         extractGzip(filename, dest)
         # We take the path to the extracted file.
         names = [dest]
-        # Activating child files trigger.
+        # Activating node files trigger.
         multiple = True
         
     mime = magic.Magic(mime=True)
 
-    # Initial condition: Only 1 element. Child zip/tar: Multiple elements (multiple==True).
+    # Initial condition: Only 1 element. zip/tar/gzip node: Multiple elements (multiple==True).
     for f in names: 
         print "File: ", f
         # Initialise root, exclude and inner.
-        root = False  
-        exclude=False
         inner=False
+        node=False
         # multiple=True: Build FS absolute path for each of the extracted files.
         if(multiple):
             array = [dest, f]
@@ -262,118 +299,54 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                 invalid = True
                 status = "%s: File format not allowed" % mimetype
             # Check if it is a zip file, only for valid extensions. Avoid xlsx (mimetype=application/zip).
-            # TODO III: CREATE CHILDGENERATOR FN ON BOTH ZIP/TAR FILES.
             elif (mimetype == "application/zip" and not extension == "xlsx"):
                 print "zip-kind"
-                status = "%s: zip-kind file:" % mimetype 
-                # Set filetype to "zip-kind" -> This zip will be added in childList queue,
+                # Set filetype to "zip-kind" -> This zip will be added in nodeList queue,
                 # ready for extraction (filetype="zip-kind) once all files in the current 
                 # iteration are analysed. 
                 filetype = "zip-kind"
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
-                # Check if this file comes from the root group folder. Not extracted yet.
-                if(not multiple):
-                    print "Zip Parent path: ", f
-                    # File related to root folder (root=True).
-                    # We use the FS absolute path to the group folder file.
-                    root = True
-                    root_filename = path.split("/")[-1]
-                    root_extractfolder = root_filename.split(".")[0]
-                    # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((f, filetype, dest + "/zip/" + root_extractfolder)))
-                    print "childList: ADD ZIP PARENT -> ", childList
-                else:
-                    # If multiple, root=False, as it is a child zip file.
-                    print "Zip Child path: ", path
-                    child_extractfolder = path.split(".")[0]
-                    print "child_extractfolder: ", child_extractfolder
-                    # We exclude zip/tar elements to be included in the whitelist.
-                    exclude = True
-                    # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((path, filetype, child_extractfolder)))
-                    print "childList: ADD ZIP CHILD -> ", childList  
-
+                node = True
             elif (mimetype == "application/gzip" and extension == "gz"):
                 print "gzip-kind"
-                status = "%s: gzip-kind file:" % mimetype
-                # Set filetype to "gzip-kind" -> This tar will be added in childList queue,
+                # Set filetype to "gzip-kind" -> This tar will be added in nodeList queue,
                 # ready for extraction (filetype="gzip-kind) once all files in the current 
                 # iteration are analysed.
                 filetype = "gzip-kind"
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
-                # File related to root folder (root=True).
-                # We use the FS absolute path to the group folder file.
-                if(not multiple):
-                    print "Gzip Parent path: ", f
-                    root = True
-                    root_filename = path.split("/")[-1]
-                    root_extractfile = root_filename.split(".")[:-1]
-                    root_extractfile = ".".join(root_extractfile)
-                    # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((f, filetype, dest + "/gzip/" + root_extractfile)))
-                    print "childList: ADD GZIP PARENT -> ", childList
-                else:
-                    print "Gzip Child path: ", path
-                    child_extractfile = path.split(".")[:-1]
-                    child_extractfile = ".".join(child_extractfile)
-                    print "Gzip Child path: ", path
-                    # We exclude zip/tar elements to be included in the whitelist.
-                    exclude = True
-                    # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((path, filetype, child_extractfile)))
-                    print "childList: ADD GZIP CHILD -> ", childList 
-
+                node = True
             elif (mimetype == "application/x-tar" or mimetype == "application/x-compressed" 
                 or mimetype == "application/x-bzip2" or mimetype == "application/gzip"):
                 print "tar-kind"
-                status = "%s: tar-kind file:" % mimetype
-                # Set filetype to "tar-kind" -> This tar will be added in childList queue,
+                # Set filetype to "tar-kind" -> This tar will be added in nodeList queue,
                 # ready for extraction (filetype="tar-kind) once all files in the current 
                 # iteration are analysed.
                 filetype = "tar-kind"
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
-                if(not multiple):
-                    print "Tar Parent path: ", f
-                    # File related to root folder (root=True).
-                    # We use the FS absolute path to the group folder file.
-                    root = True
-                    root_filename = path.split("/")[-1]
-                    root_extractfolder = root_filename.split(".")[0]
-                    print "root_extractfolder: ", root_extractfolder
-                    # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((f, filetype, dest + "/tar/" + root_extractfolder)))
-                    print "childList: ADD TAR PARENT -> ", childList
-                else:
-                   # If multiple, root=False, as it is a child zip file.
-                    print "Tar Child path: ", path
-                    child_extractfolder = path.split(".")[0]
-                    # We exclude zip/tar elements to be included in the whitelist.
-                    exclude = True
-                    # Add the element to childList queue, in order to be extracted.
-                    childList.append(tuple((path, filetype, child_extractfolder)))
-                    print "childList: ADD TAR CHILD -> ", childList 
+                node = True
 
-                    # TODO IV: ADD THIS MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
-                    # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
+            # Generate root or child node.
+            if(inner and node):
+                nodeList = nodeGenerator(f, path, dest, multiple, filetype, nodeList)
+            
+            print "Node: ", node
+            print "Invalid: ", invalid
+            print "Inner: ", inner
 
-            print "invalid: ", invalid
-            print "inner: ", inner
-            print "root: ", root
-
-            # This includes:
-            # a. childList extracted files which are valid and they are not zip/tar/gzip files.
-            if(not invalid and inner and not root and not exclude):
-                print "not invalid and inner and not root"
+            # Includes:
+            # a. nodeList extracted files which are valid and they are not zip/tar/gzip files.
+            if(not invalid and inner and not node):
+                print "not invalid and inner and not root/child node"
                 file_md5 = optimized_md5(path)
                 # This will save file md5 and relative path to zip/tar folder. 
                 wl_child.append(file_md5)
                 print ("wl_child: ", wl_child)
 
-            # This includes: 
-            # a. invalid files from original group folder list.
+            # Includes: 
+            # a. Invalid files from original group folder list.
             if(invalid and not inner):
                 print "invalid and not inner"
                 # Return invalid path and rejects the md5 from zip/tar file
@@ -381,17 +354,19 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                 #return [False, mimetype, extension, status]
                 return [False, status]
 
-            # This includes: 
-            # a. invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
+            # Includes: 
+            # a. Invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
             if(invalid and inner):
                 print "invalid and inner"
                 return [False, status, wl_child, path]      
 
-    if(len(childList) != 0):
-        print "STARTING CHILD EXTRACTION"
-        print childList[0]
-        #raw_input()
-        return analyseFiles(childList[0][0], childList[0][2], childList[1:], childList[0][1], inner, wl_child)
+            # TODO IV: ADD MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
+            # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
+
+    if(len(nodeList) != 0):
+        print "START NODE FILES EXTRACTION"
+        print nodeList[0]
+        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, wl_child)
     else:
         return [True]
 
@@ -538,18 +513,18 @@ def main():
                     print "Adding md5 files into whitelist"
                     for md5 in result[2]:
                         print md5
-                        # Adding md5 of valid child files, when parent zip/tar is invalid.
+                        # Adding md5 of valid childfiles, when parent zip/tar is invalid.
                         # In order to skip further analysis step. This should be implemented within
                         # analyseFiles fn (load whitelist into this fn and check matches 
-                        # between current md5 list and generated child zip/tar md5 )
+                        # between current md5 list and generated childzip/tar md5 )
                         file_whitelist.append(md5)
                     
-                    # HERE WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL CORRUPT CHILD FILE STATUS IS VALID. 
+                    # HERE WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL CORRUPT childFILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN.
                     
                     
-                    # TODO VII: ADD SOMETHING HERE WITH STATUS AND PATH FOR CHILD INVALID FILES.
-                    # WE STILL HAVE ISSUES WITH REAL PATH RECONSTRUCTION FOR EXTRACTED CHILD FILES.
+                    # TODO VII: ADD SOMETHING HERE WITH STATUS AND PATH FOR childINVALID FILES.
+                    # WE STILL HAVE ISSUES WITH REAL PATH RECONSTRUCTION FOR EXTRACTED childFILES.
                     # (DIFFICULT TASK -> LOGIC INSIDE ANALYSEFILES FN WOULD BE DIFFERENT)
                 
                     
@@ -572,9 +547,9 @@ def main():
                     if(gf_element == "3"):
                         gf_element = "secondfolder"
 
-                    # GENERIC STATUS, AS WE HAVE TO FIND A WAY TO RECONSTRUCT ABSOLUTE CHILD
-                    # FILES PATH (POINTING TO GROUP FOLDER + RELATIVE CHILD PATH) FOR
-                    # CHILD FILES.
+                    # GENERIC STATUS, AS WE HAVE TO FIND A WAY TO RECONSTRUCT ABSOLUTE child
+                    # FILES PATH (POINTING TO GROUP FOLDER + RELATIVE childPATH) FOR
+                    # childFILES.
 
                     status = "Invalid " + extension + " file. Please remove inner " \
                         + "audio and/or video files" 
