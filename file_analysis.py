@@ -134,9 +134,23 @@ def optimized_md5(fname):
 def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
        z.extractall(dest)
-    print "path to real extraction folder: ", dest
-    print "Extracted files: ", z.namelist()
     return z.namelist()
+
+def extractGzip(filename, dest, block_size=65536):
+    directory = dest.split("/")[:-1]
+    directory = "/".join(directory)
+    if(not os.path.exists(directory)):
+        os.makedirs(directory)
+    raw_input()
+    with gzip.open(filename, 'rb') as s_file, \
+        open(dest, 'wb') as d_file:
+        while True:
+            block = s_file.read(block_size)
+            if not block:
+                break
+            else:
+                d_file.write(block)
+        d_file.write(block)
 
 def extractTar(filename, dest):
     if filename.endswith("tar.gz"):
@@ -162,7 +176,7 @@ def getExtension(filename):
         if(dummy_ext == "tar.gz" or dummy_ext == "tar.bz2"):
             extension = dummy_ext
         else:
-            extension = dummy_ext[-1]
+            extension = extension[-1]
     return extension
 
 # Recursively unzip/untar all files and analyse them. In case is not zip/tar, analyse them too.
@@ -200,8 +214,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
         # Extract gzip. In this case, just one file. Not tar.
         extractGzip(filename, dest)
         # We take the path to the extracted file.
-        names = dest
-        print names
+        names = [dest]
         # Activating child files trigger.
         multiple = True
         
@@ -274,11 +287,43 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                     # If multiple, root=False, as it is a child zip file.
                     print "Zip Child path: ", path
                     child_extractfolder = path.split(".")[0]
+                    print "child_extractfolder: ", child_extractfolder
                     # We exclude zip/tar elements to be included in the whitelist.
                     exclude = True
                     # Add the element to childList queue, in order to be extracted.
                     childList.append(tuple((path, filetype, child_extractfolder)))
                     print "childList: ADD ZIP CHILD -> ", childList  
+
+            elif (mimetype == "application/gzip" and extension == "gz"):
+                print "gzip-kind"
+                status = "%s: gzip-kind file:" % mimetype
+                # Set filetype to "gzip-kind" -> This tar will be added in childList queue,
+                # ready for extraction (filetype="gzip-kind) once all files in the current 
+                # iteration are analysed.
+                filetype = "gzip-kind"
+                # Triggering analyseFiles fn recursivity (inner=True).
+                inner = True
+                # File related to root folder (root=True).
+                # We use the FS absolute path to the group folder file.
+                if(not multiple):
+                    print "Gzip Parent path: ", f
+                    root = True
+                    root_filename = path.split("/")[-1]
+                    root_extractfile = root_filename.split(".")[:-1]
+                    root_extractfile = ".".join(root_extractfile)
+                    # Add the element to childList queue, in order to be extracted.
+                    childList.append(tuple((f, filetype, dest + "/gzip/" + root_extractfile)))
+                    print "childList: ADD GZIP PARENT -> ", childList
+                else:
+                    print "Gzip Child path: ", path
+                    child_extractfile = path.split(".")[:-1]
+                    child_extractfile = ".".join(child_extractfile)
+                    print "Gzip Child path: ", path
+                    # We exclude zip/tar elements to be included in the whitelist.
+                    exclude = True
+                    # Add the element to childList queue, in order to be extracted.
+                    childList.append(tuple((path, filetype, child_extractfile)))
+                    print "childList: ADD GZIP CHILD -> ", childList 
 
             elif (mimetype == "application/x-tar" or mimetype == "application/x-compressed" 
                 or mimetype == "application/x-bzip2" or mimetype == "application/gzip"):
@@ -297,6 +342,7 @@ def analyseFiles(filename, dest, childList, filetype, inner, wl_child):
                     root = True
                     root_filename = path.split("/")[-1]
                     root_extractfolder = root_filename.split(".")[0]
+                    print "root_extractfolder: ", root_extractfolder
                     # Add the element to childList queue, in order to be extracted.
                     childList.append(tuple((f, filetype, dest + "/tar/" + root_extractfolder)))
                     print "childList: ADD TAR PARENT -> ", childList
@@ -475,6 +521,8 @@ def main():
                 mimetype = mime.from_file(abs_file)
                 # Getting the file extension
                 extension = getExtension(abs_file)
+                print ("Get extension:", extension)
+                raw_input()
                 # Main analysis fn.
                 result = analyseFiles(abs_file, group_prefix, [], "seed", False, [])
                 
