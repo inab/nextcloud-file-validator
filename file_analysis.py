@@ -141,7 +141,7 @@ def extractGzip(filename, dest, block_size=65536):
     directory = "/".join(directory)
     if(not os.path.exists(directory)):
         os.makedirs(directory)
-    raw_input()
+
     with gzip.open(filename, 'rb') as s_file, \
         open(dest, 'wb') as d_file:
         while True:
@@ -218,7 +218,7 @@ def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
     return nodeList
 
 # Recursively unzip/untar/ungzip all files and analyse them. In case is not zip/tar/unzip, analyse them too.
-def analyseFiles(filename, dest, nodeList, filetype, inner, wl_child):
+def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild):
     # TODO I: ADD FOR : CURRENT MD5 WHITELIST VS CURRENT MD5 ZIP/TAR/GZIP CHILD AVOID EXTRACTION STEP. 
     names, path = [filename], filename   
     # Inner fn parameter: Triggers analyseFiles recursivity. 
@@ -266,10 +266,15 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, wl_child):
         node=False
         # multiple=True: Build FS absolute path for each of the extracted files.
         if(multiple):
-            array = [dest, f]
-            path = "/".join(array)
-            print "Final file path: ", path
-            inner=True
+            if(filetype == "gzip-kind"):
+                path = f
+                inner=True
+                print "Final file path: ", path
+            else:
+                array = [dest, f]
+                path = "/".join(array)
+                print "Final file path: ", path
+                inner=True
         # Check if it's a file. If True, analyse it.
         if(os.path.isfile(path)):
             # Initialise invalid files trigger to False.
@@ -342,8 +347,8 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, wl_child):
                 print "not invalid and inner and not root/child node"
                 file_md5 = optimized_md5(path)
                 # This will save file md5 and relative path to zip/tar folder. 
-                wl_child.append(file_md5)
-                print ("wl_child: ", wl_child)
+                whitelistChild.append(tuple((file_md5, path)))
+                print ("whitelistChild: ", whitelistChild)
 
             # Includes: 
             # a. Invalid files from original group folder list.
@@ -358,7 +363,8 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, wl_child):
             # a. Invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
             if(invalid and inner):
                 print "invalid and inner"
-                return [False, status, wl_child, path]      
+                file_md5 = optimized_md5(path)
+                invalidChild.append(tuple((status, file_md5, extension, mimetype, path)))    
 
             # TODO IV: ADD MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
             # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
@@ -366,7 +372,9 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, wl_child):
     if(len(nodeList) != 0):
         print "START NODE FILES EXTRACTION"
         print nodeList[0]
-        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, wl_child)
+        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild)
+    elif(len(invalidChild) !=0):
+        return ["invalidChild", invalidChild, whitelistChild]
     else:
         return [True]
 
@@ -497,70 +505,79 @@ def main():
                 # Getting the file extension
                 extension = getExtension(abs_file)
                 print ("Get extension:", extension)
-                raw_input()
                 # Main analysis fn.
-                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [])
+                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [])
                 
                 if(len(result) == 1):
-                    print "All files are good: len == 1"
+                    print "Valid file."
                     # Adding md5 of parent zip/tar if it's valid. 
+                    print "File : ", abs_file
                     file_whitelist.append(md5)
                     # TODO V: REMOVE EXTRACTED FILES FROM FS IF THEY ARE VALID.
+
                 # TODO VI: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
                 # THE SAME -> FN.
-                elif(len(result) == 4):
-                    print "Wrong file detected"
-                    print "Adding md5 files into whitelist"
-                    for md5 in result[2]:
-                        print md5
+                elif(result[0] == "invalidChild"):
+                    print "Invalid child file list."
+                    blacklistCandidates = result[1]
+                    whitelistCandidates = result[2]
+                    
+                    # FOR NOW WE SKIP THIS PART, UNTIL WE FIND A WAY TO CHECK MD5 IN ANALYSIS FN.
+                    """
+                    # print "Child md5 whitelist: ", whitelistCandidates
+                    for obj in whitelistCandidates:
+                        print obj[0]
+                        print obj[1]
                         # Adding md5 of valid childfiles, when parent zip/tar is invalid.
                         # In order to skip further analysis step. This should be implemented within
                         # analyseFiles fn (load whitelist into this fn and check matches 
                         # between current md5 list and generated childzip/tar md5 )
-                        file_whitelist.append(md5)
-                    
-                    # HERE WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL CORRUPT childFILE STATUS IS VALID. 
-                    # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN.
-                    
-                    
-                    # TODO VII: ADD SOMETHING HERE WITH STATUS AND PATH FOR childINVALID FILES.
-                    # WE STILL HAVE ISSUES WITH REAL PATH RECONSTRUCTION FOR EXTRACTED childFILES.
-                    # (DIFFICULT TASK -> LOGIC INSIDE ANALYSEFILES FN WOULD BE DIFFERENT)
-                
-                    
-                    # FOR NOW, WE ONLY REGISTER ROOT FILE FEATURES (MD5,...) INTO BLACKLIST. 
-                    
-                    # If invalid mimetype or extension, process data for sending an email to 
-                    # group folder admin in a later stage.
-                    # Extract the name of the group folder and build Nextcloud UI path.
-                    file_user_elements = abs_file.split("/")[gf_elements_index+1:]
-                    file_user_path = "/".join(file_user_elements)
+                        #file_whitelist.append(md5)
+                    """
 
-                    # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
-                    # UI group folder name.
-                    
+                    # BESIDES WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
+                    # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
+
                     # TODO VIII: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
                     # EXTRACT GROUP FOLDER NAME FROM PATH AND COMPARE WITH MYCONTACTS.TXT FOR
                     # ASSIGNING A NEXTCLOUD FOLDER NAME ("TESTFOLDER", ...)
+                    # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
+                    # UI group folder name.
                     if(gf_element == "1"):
                         gf_element = "testfolder"
                     if(gf_element == "3"):
                         gf_element = "secondfolder"
+                    
+                    # BUILD RELATIVE PATHS.
+                    # ROOT: ADD IT TO EMAIL BLACKLIST
+                    file_user_elements = abs_file.split("/")[gf_elements_index+1:]
+                    file_user_path = "/".join(file_user_elements)
+                    status = "Invalid content within %s" % file_user_path
+                    blacklistCandidates.insert(0, (tuple((status, file_md5, extension, mimetype, file_user_path))))
 
-                    # GENERIC STATUS, AS WE HAVE TO FIND A WAY TO RECONSTRUCT ABSOLUTE child
-                    # FILES PATH (POINTING TO GROUP FOLDER + RELATIVE childPATH) FOR
-                    # childFILES.
+                    # CHILDS: GET EXTRACTION FOLDER PREFIX LEN.
+                    prefix_len = len(group_prefix.split("/")) + 1
+                    
+                    # REMOVE PREFIX FROM ABSOLUTE CHILD PATHS.
+                    counter = 0
+                    for el in blacklistCandidates:
+                        # ROOT.
+                        if(counter == 0):
+                            rebuiltPath = el[4]
+                            counter += 1
+                        # CHILDS.
+                        else:
+                            file_user_elements = el[4].split("/")[prefix_len:]
+                            rebuiltPath = "/".join(file_user_elements)
 
-                    status = "Invalid " + extension + " file. Please remove inner " \
-                        + "audio and/or video files" 
-                    # We create a dictionary array , representing invalid files.
-                    file_blacklist.append({ "md5" : md5,
-                                            "group" : gf_element,
-                                            "path" : file_user_path,
-                                            "extension" : extension,
-                                            "mimetype" : mimetype,
-                                            "status" : status
-                    })
+                        # We create a dictionary array , representing invalid files.
+                        file_blacklist.append({ "md5" : el[1],
+                                                "group" : gf_element,
+                                                "path" : rebuiltPath,
+                                                "extension" : el[2],
+                                                "mimetype" : el[3],
+                                                "status" : el[0]
+                        })  
 
                 else: 
                     # If invalid mimetype or extension, process data for sending an email to 
