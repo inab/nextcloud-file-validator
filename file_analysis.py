@@ -134,14 +134,8 @@ def optimized_md5(fname):
 def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
         for member in z.namelist():
-            print "z.namelist(): %s", z.namelist()
             if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
-                print "member: %s " % member
-                print "os path: %s " % os.path.exists(dest + r'/' + member)
-                print "os file: %s " % os.path.isfile(dest + r'/' + member)
             else:
-                print "member doesn't exist: %s " % member
-                print "extracting..."
                 z.extract(member, dest)
     return z.namelist()
 
@@ -165,15 +159,26 @@ def extractGzip(filename, dest, block_size=65536):
 def extractTar(filename, dest):
     if filename.endswith("tar.gz"):
         tar = tarfile.open(filename, "r:gz")
-        tar.extractall(dest)
+        for member in tar.getnames():
+            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+            else:
+                tar.extract(member, dest)
+        #tar.extractall(dest)
         return tar.getnames()
     elif filename.endswith("tar.bz2"):
         tar = tarfile.open(filename, "r:bz2")
-        tar.extractall(dest)
+        for member in tar.getnames():
+            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+            else:
+                tar.extract(member, dest)
+        #tar.extractall(dest)
         return tar.getnames()
     elif filename.endswith("tar"):
         tar = tarfile.open(filename, "r:")
-        tar.extractall(dest)
+        for member in tar.getnames():
+            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+            else:
+                tar.extract(member, dest)
         return tar.getnames()
 
 def getExtension(filename):
