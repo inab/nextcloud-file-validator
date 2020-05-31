@@ -133,8 +133,18 @@ def optimized_md5(fname):
 
 def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
-       z.extractall(dest)
+        for member in z.namelist():
+            print "z.namelist(): %s", z.namelist()
+            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+                print "member: %s " % member
+                print "os path: %s " % os.path.exists(dest + r'/' + member)
+                print "os file: %s " % os.path.isfile(dest + r'/' + member)
+            else:
+                print "member doesn't exist: %s " % member
+                print "extracting..."
+                z.extract(member, dest)
     return z.namelist()
+
 
 def extractGzip(filename, dest, block_size=65536):
     directory = dest.split("/")[:-1]
