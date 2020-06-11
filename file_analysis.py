@@ -135,6 +135,14 @@ def optimized_md5(fname):
       hash.update(chunk)
   return hash.hexdigest()
 
+def md5Checker(fname, childrenMD5):
+    current_md5 = optimized_md5(fname)
+    skip = False
+    for md5 in childrenMD5:
+        if(current_md5 == md5):
+            skip = True
+    return skip
+
 def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
         for member in z.namelist():
@@ -236,8 +244,7 @@ def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
     return nodeList
 
 # Recursively unzip/untar/ungzip all files and analyse them. In case is not zip/tar/unzip, analyse them too.
-def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild, childrenNodes, rootKind):
-    # TODO I: ADD FOR : CURRENT MD5 WHITELIST VS CURRENT MD5 ZIP/TAR/GZIP CHILD AVOID EXTRACTION STEP. 
+def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild, childrenNodes, rootKind, md5Children):
     names, path = [filename], filename   
     # Inner fn parameter: Triggers analyseFiles recursivity. 
     # Only if zip/tar/gzip files are present in the current group folder.
@@ -245,7 +252,7 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
     multiple = False
     # This condition is not fulfilled with the initial filetype. Only node zip/tar/gzip files.
     # Initial filetype="seed".
-    # TODO II: ADD BZ2 (WITHOUT TAR.X), TBZ2, TGZ (READ/EXTRACT FUNCTIONS). 
+    # TODO I: ADD BZ2 (WITHOUT TAR.X), TBZ2, TGZ (READ/EXTRACT FUNCTIONS). 
     if(filetype == "zip-kind"):
         # Getting node zip filenames. Relative to initial zip file folder name.
         names = extractZip(filename, dest)
@@ -280,111 +287,109 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
                 array = [dest, f]
                 path = "/".join(array)
                 inner=True
-
-        # Check if it's a file. If True, analyse it.
+        # Check if it's a file. 
         if(os.path.isfile(path)):
-            # Initialise invalid files trigger to False.
-            invalid=False
-            # START ANALYSIS: Extension and Mimetype.
-            # a) Get mimetype:
-            mimetype = mime.from_file(path)
-            # b) Get file extension:
-            extension = getExtension(f)
-            # Check extension:
-            if (extension in black_list):
-                # Invalid triggered. invalid=True.
-                invalid = True
-                status = "%s: File extension not allowed" % extension
-            # Check mimetype for valid extension.
-            elif (mimetype == "video/x-msvideo" or mimetype == "video/mp3"
-                or mimetype == "audio/mpeg" or mimetype == "video/mp4" 
-                or mimetype == "video/mpeg" or mimetype == "video/dvd" 
-                or mimetype == "audio/wav" or mimetype == "video/webm" 
-                or mimetype == "video/x-ms-wmv"):
-                # Invalid triggered. invalid=True.
-                invalid = True
-                status = "%s: File format not allowed" % mimetype
-            # Check if it is a zip file, only for valid extensions. Avoid xlsx (mimetype=application/zip).
-            elif (mimetype == "application/zip" and not extension == "xlsx"):
-                # Set filetype to "zip-kind" -> This zip will be added in nodeList queue,
-                # ready for extraction (filetype="zip-kind) once all files in the current 
-                # iteration are analysed. 
-                filetype = "zip-kind"
-                if(not inner):
-                    rootKind = filetype
-                else:
-                    ##########
-                    # Here we have to calculate md5 for children nodes and path.
+            # SKIP ANALYSIS? Check if the file md5 already exists into the file whitelist.
+            skip = md5Checker(path, md5Children)
+            # skip = True -> Next child element
+            if(skip):
+                print "Skip analysis"
+                continue
+            else:
+                # Initialise invalid files trigger to False.
+                invalid=False
+                # START ANALYSIS: Extension and Mimetype.
+                # a) Get mimetype:
+                mimetype = mime.from_file(path)
+                # b) Get file extension:
+                extension = getExtension(f)
+                # Check extension:
+                if (extension in black_list):
+                    # Invalid triggered. invalid=True.
+                    invalid = True
+                    status = "%s: File extension not allowed" % extension
+                # Check mimetype for valid extension.
+                elif (mimetype == "video/x-msvideo" or mimetype == "video/mp3"
+                    or mimetype == "audio/mpeg" or mimetype == "video/mp4" 
+                    or mimetype == "video/mpeg" or mimetype == "video/dvd" 
+                    or mimetype == "audio/wav" or mimetype == "video/webm" 
+                    or mimetype == "video/x-ms-wmv"):
+                    # Invalid triggered. invalid=True.
+                    invalid = True
+                    status = "%s: File format not allowed" % mimetype
+                # Check if it is a zip file, only for valid extensions. Avoid xlsx (mimetype=application/zip).
+                elif (mimetype == "application/zip" and not extension == "xlsx"):
+                    # Set filetype to "zip-kind" -> This zip will be added in nodeList queue,
+                    # ready for extraction (filetype="zip-kind) once all files in the current 
+                    # iteration are analysed. 
+                    filetype = "zip-kind"
+                    if(not inner):
+                        rootKind = filetype
+                    else:
+                        # Here we have to calculate md5 for children nodes and path.
+                        file_md5 = optimized_md5(path)
+                        childrenNodes.append(tuple((file_md5, path)))
+
+                    # Triggering analyseFiles fn recursivity (inner=True).
+                    inner = True
+                    node = True
+                elif (mimetype == "application/gzip" and extension == "gz"):
+                    # Set filetype to "gzip-kind" -> This tar will be added in nodeList queue,
+                    # ready for extraction (filetype="gzip-kind) once all files in the current 
+                    # iteration are analysed.
+                    filetype = "gzip-kind"
+                    if(not inner):
+                        rootKind = filetype
+                    # Triggering analyseFiles fn recursivity (inner=True).
+                    inner = True
+                    node = True
+                elif (mimetype == "application/x-tar" or mimetype == "application/x-compressed" 
+                    or mimetype == "application/x-bzip2" or mimetype == "application/gzip"):
+                    # Set filetype to "tar-kind" -> This tar will be added in nodeList queue,
+                    # ready for extraction (filetype="tar-kind) once all files in the current 
+                    # iteration are analysed.
+                    filetype = "tar-kind"
+                    if(not inner):
+                        rootKind = filetype
+                    # Triggering analyseFiles fn recursivity (inner=True).
+                    inner = True
+                    node = True
+
+                # Generate root or child node.
+                if(inner and node):
+                    nodeList = nodeGenerator(f, path, dest, multiple, filetype, nodeList)
+
+                # Includes:
+                # a. nodeList extracted files which are valid and they are not zip/tar/gzip files.
+                if(not invalid and inner and not node):
                     file_md5 = optimized_md5(path)
-                    childrenNodes.append(tuple((file_md5, path)))
-                    ##########
-                # Triggering analyseFiles fn recursivity (inner=True).
-                inner = True
-                node = True
-            elif (mimetype == "application/gzip" and extension == "gz"):
-                # Set filetype to "gzip-kind" -> This tar will be added in nodeList queue,
-                # ready for extraction (filetype="gzip-kind) once all files in the current 
-                # iteration are analysed.
-                filetype = "gzip-kind"
-                if(not inner):
-                    rootKind = filetype
-                # Triggering analyseFiles fn recursivity (inner=True).
-                inner = True
-                node = True
-            elif (mimetype == "application/x-tar" or mimetype == "application/x-compressed" 
-                or mimetype == "application/x-bzip2" or mimetype == "application/gzip"):
-                # Set filetype to "tar-kind" -> This tar will be added in nodeList queue,
-                # ready for extraction (filetype="tar-kind) once all files in the current 
-                # iteration are analysed.
-                filetype = "tar-kind"
-                if(not inner):
-                    rootKind = filetype
-                # Triggering analyseFiles fn recursivity (inner=True).
-                inner = True
-                node = True
+                    # This will save file md5 and relative path to zip/tar folder. 
+                    whitelistChild.append(tuple((file_md5, path)))
 
-            # Generate root or child node.
-            if(inner and node):
-                nodeList = nodeGenerator(f, path, dest, multiple, filetype, nodeList)
-                print "nodeGenerator output: ", nodeList
+                # Includes: 
+                # a. Invalid files from original group folder list.
+                if(invalid and not inner):
+                    # Return invalid path and rejects the md5 from zip/tar file
+                    return [False, status]
 
-            # Includes:
-            # a. nodeList extracted files which are valid and they are not zip/tar/gzip files.
-            if(not invalid and inner and not node):
-                file_md5 = optimized_md5(path)
-                # This will save file md5 and relative path to zip/tar folder. 
-                whitelistChild.append(tuple((file_md5, path)))
-
-            # Includes: 
-            # a. Invalid files from original group folder list.
-            if(invalid and not inner):
-                # Return invalid path and rejects the md5 from zip/tar file
-                # Where do we have to read md5 hashes?
-                #return [False, mimetype, extension, status]
-                return [False, status]
-
-            # Includes: 
-            # a. Invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
-            if(invalid and inner):
-                file_md5 = optimized_md5(path)
-                # We store invalid children files for reports.
-                invalidChild.append(tuple((status, file_md5, extension, mimetype, path)))
-                # Also, we remove from children nodes list invalid nodes (They won't be removed
-                # in a latter stage...)
-                invalidChild_folder = path.split("/")[-2]
-                temp = []
-                
-                for el in childrenNodes:
-                    childrenNode_folder = el[1].split("/")[-1].split(".")[0]
-                    if(childrenNode_folder == invalidChild_folder):
-                        temp.append(el)
-                childrenNodes = list(filter(lambda x: x not in temp, childrenNodes)) 
-
-            # TODO III: ADD MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
-            # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
+                # Includes: 
+                # a. Invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
+                if(invalid and inner):
+                    file_md5 = optimized_md5(path)
+                    # We store invalid children files for reports.
+                    invalidChild.append(tuple((status, file_md5, extension, mimetype, path)))
+                    # Also, we remove from children nodes list invalid nodes. They won't be added
+                    # into the whitelist in a latter stage...)
+                    invalidChild_folder = path.split("/")[-2]
+                    temp = []
+                    for el in childrenNodes:
+                        childrenNode_folder = el[1].split("/")[-1].split(".")[0]
+                        if(childrenNode_folder == invalidChild_folder):
+                            temp.append(el)
+                    childrenNodes = list(filter(lambda x: x not in temp, childrenNodes)) 
 
     if(len(nodeList) != 0):
-        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild, childrenNodes, rootKind)
+        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild, childrenNodes, rootKind, md5Children)
     elif(len(invalidChild) !=0):
         return ["invalidChild", invalidChild, whitelistChild, childrenNodes]
     else:
@@ -492,8 +497,10 @@ def main():
 
     # Step II: Check all extensions and mimetypes.
 
-    # Open whitelist and load md5 into memory.
-    md5_checked = read_whitelist(args.rootWhite)
+    # Open whitelists and load md5 into memory.
+    md5_root_checked = read_whitelist(args.rootWhite)
+    md5_children_checked = read_whitelist(args.childrenWhite)
+    print md5_children_checked
     # II.b. Analyze mimetypes for all the elements of files_path_md5.
 
     file_blacklist = []
@@ -505,7 +512,7 @@ def main():
 
     for md5 in files_path_md5:
         # For each md5 with Valid status, skip the analysis.
-        if(md5 in md5_checked):
+        if(md5 in md5_root_checked):
             continue
         # For each md5, extracts the value (set(['path']))
         for abs_file in files_path_md5[md5]:
@@ -522,7 +529,7 @@ def main():
                 # rootKind init
                 rootKind = ""
                 # Main analysis fn.
-                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], [], rootKind)
+                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], [], rootKind, md5_children_checked)
                 
                 if(len(result) == 2 and result[0] == True):
                     # Adding md5 if it's valid. 
@@ -537,18 +544,22 @@ def main():
                 # TODO V: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
                 # THE SAME -> FN.
                 elif(result[0] == "invalidChild"):
+                    print "Invalid child"
                     blacklistCandidates = result[1]
-                    whitelistCandidates = result[2]
-                    childrenNodes = result[3]
-                    childrenNodes_whitelist = []
-                    # Removal from FS of valid childrenNodes as they won't be analysed again.
-                    # Addition of children nodes into the children_whitelist.
-                    if(childrenNodes != 0):     
-                        for el in childrenNodes:
-                            removeNodeFromFS(el[1].split(".")[0])
-                            childrenNodes_whitelist.append(el[0])
+                    childrenFiles_whitelist_temp = result[2]
+                    childrenNodes = result[3]          
+                    childrenFiles_whitelist = []  
+                    # Adding only MD5 from valid children files. Skip further analysis.
+                    if(len(childrenFiles_whitelist_temp) != 0):  
+                        for el in childrenFiles_whitelist_temp:
+                            childrenFiles_whitelist.append(el[0])
+                    # Adding childNode MD5 to the childrenFiles whitelist. Skip further analysis.
+                    # Removal from FS of valid childrenNodes. Disabled (Different strategy)
+                    for el in childrenNodes:
+                        # removeNodeFromFS(el[1].split(".")[0])   REMOVAL FROM FS DISABLED!
+                        childrenFiles_whitelist.append(el[0])
 
-                    # BESIDES WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
+                    # WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
 
                     # TODO VI: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
@@ -617,11 +628,13 @@ def main():
                                             "status" : result[1]
                     })
 
-    # Updating whitelist (already analised files) adding new Valid files.
+    # Updating root nodes whitelist (already analised files) adding new Valid files.
     update_whitelist(args.rootWhite, file_whitelist)
+    # Updating children nodes whitelist.
+    update_whitelist(args.childrenWhite, childrenFiles_whitelist)
 
-    # Step III: Save in a tsv all blacklisted elements for group folders,
-    
+    # Step III: Save in a tsv all blacklisted elements for group folders.
+
     # Check the previous blacklist document, in case status field has changed.
     # We store in memory all entries in a dictionary array. 
     previous_blacklist = read_blacklist(args.black)
