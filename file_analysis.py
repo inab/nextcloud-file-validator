@@ -124,6 +124,10 @@ def update_blacklist(path, current_blacklist, previous_blacklist):
 
     return files_email
 
+def removeFromFS(path):
+    if(os.path.exists(path)):
+        shutil.rmtree(path)
+
 def optimized_md5(fname):
   hash = md5()
   with open(fname) as f:
@@ -135,6 +139,7 @@ def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
         for member in z.namelist():
             if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+                print "Skipping extraction step"
             else:
                 z.extract(member, dest)
     return z.namelist()
@@ -161,6 +166,7 @@ def extractTar(filename, dest):
         tar = tarfile.open(filename, "r:gz")
         for member in tar.getnames():
             if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+                print "ok"
             else:
                 tar.extract(member, dest)
         #tar.extractall(dest)
@@ -169,6 +175,7 @@ def extractTar(filename, dest):
         tar = tarfile.open(filename, "r:bz2")
         for member in tar.getnames():
             if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+                print "ok"
             else:
                 tar.extract(member, dest)
         #tar.extractall(dest)
@@ -177,6 +184,7 @@ def extractTar(filename, dest):
         tar = tarfile.open(filename, "r:")
         for member in tar.getnames():
             if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
+                print "ok"
             else:
                 tar.extract(member, dest)
         return tar.getnames()
@@ -215,10 +223,9 @@ def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
         # Add the element to nodeList queue, in order to be extracted.
         # Extraction path: prefix + /filetype/ + suffix
         nodeList.append(tuple((absPath, filetype, prefix + "/" + filetype + "/" + suffix)))
-        #print ("ADDING %s PARENT -> %s" % filetype, nodeList[-1])
+        
     else:
         # If multiple, root=False, as it is a child zip/tar/gzip file.
-        #print ("%s Child path: %s" % filetype, relPath)
 
         if(filetype == "gzip-kind"):
             suffix = relPath.split(".")[:-1]
@@ -228,12 +235,11 @@ def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
 
         # Add the element to nodeList queue, in order to be extracted.
         nodeList.append(tuple((relPath, filetype, suffix)))
-        #print ("ADDING %s CHILD -> %s" % filetype, nodeList[-1])
                 
     return nodeList
 
 # Recursively unzip/untar/ungzip all files and analyse them. In case is not zip/tar/unzip, analyse them too.
-def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild):
+def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild, rootKind):
     # TODO I: ADD FOR : CURRENT MD5 WHITELIST VS CURRENT MD5 ZIP/TAR/GZIP CHILD AVOID EXTRACTION STEP. 
     names, path = [filename], filename   
     # Inner fn parameter: Triggers analyseFiles recursivity. 
@@ -244,26 +250,16 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
     # Initial filetype="seed".
     # TODO II: ADD BZ2 (WITHOUT TAR.X), TBZ2, TGZ (READ/EXTRACT FUNCTIONS). 
     if(filetype == "zip-kind"):
-        print "zip-kind extraction"
-        print "zip-kind path: ", filename
-        print "Extraction destination: ", dest
         # Getting node zip filenames. Relative to initial zip file folder name.
         names = extractZip(filename, dest)
         # Activating node files trigger.
         multiple = True
     elif(filetype == "tar-kind"):
-        print "tar-kind extraction"
-        print "tar-kind path: ", filename
-        print "Extraction destination: ", dest
         # Getting node tar filenames. Relative to initial tar file folder name.
         names = extractTar(filename, dest)
-        print names
         # Activating node files trigger.
         multiple = True
     elif(filetype == "gzip-kind"):
-        print "gzip-kind extraction"
-        print "gzip-kind path: ", filename
-        print "Extraction destination: ", dest
         # Extract gzip. In this case, just one file. Not tar.
         extractGzip(filename, dest)
         # We take the path to the extracted file.
@@ -275,7 +271,6 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
 
     # Initial condition: Only 1 element. zip/tar/gzip node: Multiple elements (multiple==True).
     for f in names: 
-        print "File: ", f
         # Initialise root, exclude and inner.
         inner=False
         node=False
@@ -284,12 +279,11 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             if(filetype == "gzip-kind"):
                 path = f
                 inner=True
-                print "Final file path: ", path
             else:
                 array = [dest, f]
                 path = "/".join(array)
-                print "Final file path: ", path
                 inner=True
+
         # Check if it's a file. If True, analyse it.
         if(os.path.isfile(path)):
             # Initialise invalid files trigger to False.
@@ -299,11 +293,6 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             mimetype = mime.from_file(path)
             # b) Get file extension:
             extension = getExtension(f)
-            # Invalid extension.
-            print "Single file: ", path
-            print "Extension: ", extension
-            print "Mimetype: ", mimetype
-
             # Check extension:
             if (extension in black_list):
                 # Invalid triggered. invalid=True.
@@ -320,30 +309,35 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
                 status = "%s: File format not allowed" % mimetype
             # Check if it is a zip file, only for valid extensions. Avoid xlsx (mimetype=application/zip).
             elif (mimetype == "application/zip" and not extension == "xlsx"):
-                print "zip-kind"
                 # Set filetype to "zip-kind" -> This zip will be added in nodeList queue,
                 # ready for extraction (filetype="zip-kind) once all files in the current 
                 # iteration are analysed. 
                 filetype = "zip-kind"
+                if(not inner):
+                    rootKind = filetype
+                    print "rootKind zip: ", rootKind
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
                 node = True
             elif (mimetype == "application/gzip" and extension == "gz"):
-                print "gzip-kind"
                 # Set filetype to "gzip-kind" -> This tar will be added in nodeList queue,
                 # ready for extraction (filetype="gzip-kind) once all files in the current 
                 # iteration are analysed.
                 filetype = "gzip-kind"
+                if(not inner):
+                    rootKind = filetype
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
                 node = True
             elif (mimetype == "application/x-tar" or mimetype == "application/x-compressed" 
                 or mimetype == "application/x-bzip2" or mimetype == "application/gzip"):
-                print "tar-kind"
                 # Set filetype to "tar-kind" -> This tar will be added in nodeList queue,
                 # ready for extraction (filetype="tar-kind) once all files in the current 
                 # iteration are analysed.
                 filetype = "tar-kind"
+                if(not inner):
+                    rootKind = filetype
+                    print "rootKind tar: ", rootKind
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
                 node = True
@@ -351,24 +345,17 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             # Generate root or child node.
             if(inner and node):
                 nodeList = nodeGenerator(f, path, dest, multiple, filetype, nodeList)
-            
-            print "Node: ", node
-            print "Invalid: ", invalid
-            print "Inner: ", inner
 
             # Includes:
             # a. nodeList extracted files which are valid and they are not zip/tar/gzip files.
             if(not invalid and inner and not node):
-                print "not invalid and inner and not root/child node"
                 file_md5 = optimized_md5(path)
                 # This will save file md5 and relative path to zip/tar folder. 
                 whitelistChild.append(tuple((file_md5, path)))
-                print ("whitelistChild: ", whitelistChild)
 
             # Includes: 
             # a. Invalid files from original group folder list.
             if(invalid and not inner):
-                print "invalid and not inner"
                 # Return invalid path and rejects the md5 from zip/tar file
                 # Where do we have to read md5 hashes?
                 #return [False, mimetype, extension, status]
@@ -377,21 +364,18 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             # Includes: 
             # a. Invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
             if(invalid and inner):
-                print "invalid and inner"
                 file_md5 = optimized_md5(path)
                 invalidChild.append(tuple((status, file_md5, extension, mimetype, path)))    
 
-            # TODO IV: ADD MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
+            # TODO III: ADD MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
             # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
 
     if(len(nodeList) != 0):
-        print "START NODE FILES EXTRACTION"
-        print nodeList[0]
-        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild)
+        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild, rootKind)
     elif(len(invalidChild) !=0):
         return ["invalidChild", invalidChild, whitelistChild]
     else:
-        return [True]
+        return [True, rootKind]
 
 def main():
 
@@ -520,17 +504,31 @@ def main():
                 # Getting the file extension
                 extension = getExtension(abs_file)
                 print ("Get extension:", extension)
+                # rootKind init
+                rootKind = ""
                 # Main analysis fn.
-                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [])
+                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], rootKind)
                 
-                if(len(result) == 1):
-                    print "Valid file."
-                    # Adding md5 of parent zip/tar if it's valid. 
+                if(len(result) == 2 and result[0] == True):
+                    print "Valid root file"
+                    # Adding md5 if it's valid. 
                     print "File : ", abs_file
+                    print "Group prefix: ", group_prefix
                     file_whitelist.append(md5)
-                    # TODO V: REMOVE EXTRACTED FILES FROM FS IF THEY ARE VALID.
+                    print "result: ", result
+                    # TODO IV: REMOVE EXTRACTED FILES FROM FS IF THEY ARE VALID.
+                    if(result[1] != rootKind): 
+                        print "path: ", abs_file
+                        print "kind: ", result[1]
+                        print "filename: ", file_name
+                        folder_name = file_name.split(".")[0]
+                        print "foldername: ", folder_name
+                        extraction_path = group_prefix + "/" + result[1] + "/" + folder_name
+                        print "Extraction path: ", extraction_path 
+                        # Here we have to remove Nextcloud prefix and add temp prefix
+                        removeFromFS(extraction_path)
 
-                # TODO VI: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
+                # TODO V: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
                 # THE SAME -> FN.
                 elif(result[0] == "invalidChild"):
                     print "Invalid child file list."
@@ -553,7 +551,7 @@ def main():
                     # BESIDES WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
 
-                    # TODO VIII: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
+                    # TODO VI: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
                     # EXTRACT GROUP FOLDER NAME FROM PATH AND COMPARE WITH MYCONTACTS.TXT FOR
                     # ASSIGNING A NEXTCLOUD FOLDER NAME ("TESTFOLDER", ...)
                     # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
@@ -644,8 +642,8 @@ def main():
     s.starttls()
     s.login(USER, PASSWORD)
 
-    # TODO IX: BUILD A FUNCTION FOR EMAIL SENDING.
-    # TODO X: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
+    # TODO VII: BUILD A FUNCTION FOR EMAIL SENDING.
+    # TODO VIII: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
     # For each contact (group folder admin), send an specific email:
     for name, email, group in zip(name, email, group):
         user_file_str = ""
