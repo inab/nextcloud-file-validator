@@ -4,7 +4,7 @@
 
 # python file_analysis_salva.py -d /data/nextcloud/data/__groupfolders 
 # --exclude /data/nextcloud/data/__groupfolders/versions /data/nextcloud/data/__groupfolders/trash 
-# -o output -w whitelist.txt -b blacklist.tsv -c mycontacts.txt -t message.txt -p *****
+# -o output -rw root_whitelist.txt -cw children_whitelist.txt -b blacklist.tsv -c mycontacts.txt -t message.txt -p *****
 
 import smtplib
 from string import Template
@@ -124,7 +124,7 @@ def update_blacklist(path, current_blacklist, previous_blacklist):
 
     return files_email
 
-def removeFromFS(path):
+def removeNodeFromFS(path):
     if(os.path.exists(path)):
         shutil.rmtree(path)
 
@@ -143,7 +143,6 @@ def extractZip(filename, dest):
             else:
                 z.extract(member, dest)
     return z.namelist()
-
 
 def extractGzip(filename, dest, block_size=65536):
     directory = dest.split("/")[:-1]
@@ -169,7 +168,6 @@ def extractTar(filename, dest):
                 print "ok"
             else:
                 tar.extract(member, dest)
-        #tar.extractall(dest)
         return tar.getnames()
     elif filename.endswith("tar.bz2"):
         tar = tarfile.open(filename, "r:bz2")
@@ -178,7 +176,6 @@ def extractTar(filename, dest):
                 print "ok"
             else:
                 tar.extract(member, dest)
-        #tar.extractall(dest)
         return tar.getnames()
     elif filename.endswith("tar"):
         tar = tarfile.open(filename, "r:")
@@ -239,7 +236,7 @@ def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
     return nodeList
 
 # Recursively unzip/untar/ungzip all files and analyse them. In case is not zip/tar/unzip, analyse them too.
-def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild, rootKind):
+def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, invalidChild, childrenNodes, rootKind):
     # TODO I: ADD FOR : CURRENT MD5 WHITELIST VS CURRENT MD5 ZIP/TAR/GZIP CHILD AVOID EXTRACTION STEP. 
     names, path = [filename], filename   
     # Inner fn parameter: Triggers analyseFiles recursivity. 
@@ -315,7 +312,12 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
                 filetype = "zip-kind"
                 if(not inner):
                     rootKind = filetype
-                    print "rootKind zip: ", rootKind
+                else:
+                    ##########
+                    # Here we have to calculate md5 for children nodes and path.
+                    file_md5 = optimized_md5(path)
+                    childrenNodes.append(tuple((file_md5, path)))
+                    ##########
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
                 node = True
@@ -337,7 +339,6 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
                 filetype = "tar-kind"
                 if(not inner):
                     rootKind = filetype
-                    print "rootKind tar: ", rootKind
                 # Triggering analyseFiles fn recursivity (inner=True).
                 inner = True
                 node = True
@@ -345,6 +346,7 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             # Generate root or child node.
             if(inner and node):
                 nodeList = nodeGenerator(f, path, dest, multiple, filetype, nodeList)
+                print "nodeGenerator output: ", nodeList
 
             # Includes:
             # a. nodeList extracted files which are valid and they are not zip/tar/gzip files.
@@ -365,15 +367,26 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             # a. Invalid files from extracted zip/tar/gzip, excluding zip/tar/gzip elements.
             if(invalid and inner):
                 file_md5 = optimized_md5(path)
-                invalidChild.append(tuple((status, file_md5, extension, mimetype, path)))    
+                # We store invalid children files for reports.
+                invalidChild.append(tuple((status, file_md5, extension, mimetype, path)))
+                # Also, we remove from children nodes list invalid nodes (They won't be removed
+                # in a latter stage...)
+                invalidChild_folder = path.split("/")[-2]
+                temp = []
+                
+                for el in childrenNodes:
+                    childrenNode_folder = el[1].split("/")[-1].split(".")[0]
+                    if(childrenNode_folder == invalidChild_folder):
+                        temp.append(el)
+                childrenNodes = list(filter(lambda x: x not in temp, childrenNodes)) 
 
             # TODO III: ADD MD5 IF ALL ITS EXTRACTED FILES ARE VALID. 
             # IN ORDER TO USE IT IN COMBINATION WITH TODO I (DIFFICULT TASK)
 
     if(len(nodeList) != 0):
-        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild, rootKind)
+        return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild, childrenNodes, rootKind)
     elif(len(invalidChild) !=0):
-        return ["invalidChild", invalidChild, whitelistChild]
+        return ["invalidChild", invalidChild, whitelistChild, childrenNodes]
     else:
         return [True, rootKind]
 
@@ -395,8 +408,11 @@ def main():
     parser.add_argument("--remove", dest = "remove", default = False, action = \
     "store_true", help = "Ask to remove duplicated files and empty folders")
 
-    parser.add_argument("-w", "--white", default = None, type = str, help = \
-    "Whitelist file path")
+    parser.add_argument("-rw", "--rootWhite", default = None, type = str, help = \
+    "Root whitelist file path")
+
+    parser.add_argument("-cw", "--childrenWhite", default = None, type = str, help = \
+    "Children whitelist file path")
 
     parser.add_argument("-b", "--black", default = None, type = str, help = \
     "Blacklist file path")
@@ -477,7 +493,7 @@ def main():
     # Step II: Check all extensions and mimetypes.
 
     # Open whitelist and load md5 into memory.
-    md5_checked = read_whitelist(args.white)
+    md5_checked = read_whitelist(args.rootWhite)
     # II.b. Analyze mimetypes for all the elements of files_path_md5.
 
     file_blacklist = []
@@ -503,50 +519,34 @@ def main():
                 mimetype = mime.from_file(abs_file)
                 # Getting the file extension
                 extension = getExtension(abs_file)
-                print ("Get extension:", extension)
                 # rootKind init
                 rootKind = ""
                 # Main analysis fn.
-                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], rootKind)
+                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], [], rootKind)
                 
                 if(len(result) == 2 and result[0] == True):
-                    print "Valid root file"
                     # Adding md5 if it's valid. 
-                    print "File : ", abs_file
-                    print "Group prefix: ", group_prefix
                     file_whitelist.append(md5)
-                    print "result: ", result
-                    # TODO IV: REMOVE EXTRACTED FILES FROM FS IF THEY ARE VALID.
+                    # Removing root files from FS.
                     if(result[1] != rootKind): 
-                        print "path: ", abs_file
-                        print "kind: ", result[1]
-                        print "filename: ", file_name
                         folder_name = file_name.split(".")[0]
-                        print "foldername: ", folder_name
                         extraction_path = group_prefix + "/" + result[1] + "/" + folder_name
-                        print "Extraction path: ", extraction_path 
                         # Here we have to remove Nextcloud prefix and add temp prefix
-                        removeFromFS(extraction_path)
+                        removeNodeFromFS(extraction_path)
 
                 # TODO V: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
                 # THE SAME -> FN.
                 elif(result[0] == "invalidChild"):
-                    print "Invalid child file list."
                     blacklistCandidates = result[1]
                     whitelistCandidates = result[2]
-                    
-                    # FOR NOW WE SKIP THIS PART, UNTIL WE FIND A WAY TO CHECK MD5 IN ANALYSIS FN.
-                    """
-                    # print "Child md5 whitelist: ", whitelistCandidates
-                    for obj in whitelistCandidates:
-                        print obj[0]
-                        print obj[1]
-                        # Adding md5 of valid childfiles, when parent zip/tar is invalid.
-                        # In order to skip further analysis step. This should be implemented within
-                        # analyseFiles fn (load whitelist into this fn and check matches 
-                        # between current md5 list and generated childzip/tar md5 )
-                        #file_whitelist.append(md5)
-                    """
+                    childrenNodes = result[3]
+                    childrenNodes_whitelist = []
+                    # Removal from FS of valid childrenNodes as they won't be analysed again.
+                    # Addition of children nodes into the children_whitelist.
+                    if(childrenNodes != 0):     
+                        for el in childrenNodes:
+                            removeNodeFromFS(el[1].split(".")[0])
+                            childrenNodes_whitelist.append(el[0])
 
                     # BESIDES WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
@@ -618,7 +618,7 @@ def main():
                     })
 
     # Updating whitelist (already analised files) adding new Valid files.
-    update_whitelist(args.white, file_whitelist)
+    update_whitelist(args.rootWhite, file_whitelist)
 
     # Step III: Save in a tsv all blacklisted elements for group folders,
     
