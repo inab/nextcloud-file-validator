@@ -147,7 +147,7 @@ def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
         for member in z.namelist():
             if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
-                print "Skipping extraction step"
+                print "Skip extraction step"
             else:
                 z.extract(member, dest)
     return z.namelist()
@@ -500,11 +500,12 @@ def main():
     # Open whitelists and load md5 into memory.
     md5_root_checked = read_whitelist(args.rootWhite)
     md5_children_checked = read_whitelist(args.childrenWhite)
-    print md5_children_checked
+
     # II.b. Analyze mimetypes for all the elements of files_path_md5.
 
     file_blacklist = []
     file_whitelist = []
+    childrenFiles_whitelist = [] 
     # Extracted content will be removed once it's analysed.
     extract_prefix = "temp/"
     # Here we get individual group folders index. args.root should point there.
@@ -547,22 +548,23 @@ def main():
                     print "Invalid child"
                     blacklistCandidates = result[1]
                     childrenFiles_whitelist_temp = result[2]
-                    childrenNodes = result[3]          
-                    childrenFiles_whitelist = []  
+                    childrenNodes = result[3]       
                     # Adding only MD5 from valid children files. Skip further analysis.
                     if(len(childrenFiles_whitelist_temp) != 0):  
                         for el in childrenFiles_whitelist_temp:
-                            childrenFiles_whitelist.append(el[0])
+                            if (el[0] not in md5_children_checked):
+                                childrenFiles_whitelist.append(el[0])
                     # Adding childNode MD5 to the childrenFiles whitelist. Skip further analysis.
                     # Removal from FS of valid childrenNodes. Disabled (Different strategy)
                     for el in childrenNodes:
                         # removeNodeFromFS(el[1].split(".")[0])   REMOVAL FROM FS DISABLED!
-                        childrenFiles_whitelist.append(el[0])
+                        if (el[0] not in md5_children_checked):
+                            childrenFiles_whitelist.append(el[0])
 
                     # WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
 
-                    # TODO VI: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
+                    # TODO II: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
                     # EXTRACT GROUP FOLDER NAME FROM PATH AND COMPARE WITH MYCONTACTS.TXT FOR
                     # ASSIGNING A NEXTCLOUD FOLDER NAME ("TESTFOLDER", ...)
                     # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
@@ -655,8 +657,8 @@ def main():
     s.starttls()
     s.login(USER, PASSWORD)
 
-    # TODO VII: BUILD A FUNCTION FOR EMAIL SENDING.
-    # TODO VIII: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
+    # TODO III: BUILD A FUNCTION FOR EMAIL SENDING.
+    # TODO IV: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
     # For each contact (group folder admin), send an specific email:
     for name, email, group in zip(name, email, group):
         user_file_str = ""
