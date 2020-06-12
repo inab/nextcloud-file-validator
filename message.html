@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>   
+    <title> iPC Nextcloud : File warning </title>  
+</head>
+<body>
+    <h5> Dear {{ name }} </h5>
+    <p> Some of the contents uploaded into your group folder are suspicious and/or inappropriate. </p>
+    <p> Please, delete them or send us an email to support.ipc-project@bsc.es in case they are valid. </p>
+    <h5>Files list:</h5>
+    <div id="content">{% block content %}{% endblock %}</div> 
+    <p> Best regards, </p>
+    <p> iPC Nextcloud Team </p>
+</body>
+</html>

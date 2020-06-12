@@ -10,6 +10,7 @@ import smtplib
 from string import Template
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from jinja2 import Environment, FileSystemLoader
 import magic
 import os
 import sys
@@ -50,12 +51,6 @@ def get_contacts(filename):
             email.append(a_contact.split()[1])
             group.append(a_contact.split()[2])
     return name, email, group
-
-def read_template(filename):
-    #Returns a Template object comprising the contents of the 
-    with open(filename, 'r') as template_file:
-        template_file_content = template_file.read()
-    return Template(template_file_content)
 
 def update_whitelist(path, md5_whitelist):
     with open(path, 'a') as out_file:
@@ -172,25 +167,19 @@ def extractTar(filename, dest):
     if filename.endswith("tar.gz"):
         tar = tarfile.open(filename, "r:gz")
         for member in tar.getnames():
-            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
-                print "ok"
-            else:
+            if not os.path.exists(dest + r'/' + member) or not os.path.isfile(dest + r'/' + member):
                 tar.extract(member, dest)
         return tar.getnames()
     elif filename.endswith("tar.bz2"):
         tar = tarfile.open(filename, "r:bz2")
         for member in tar.getnames():
-            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
-                print "ok"
-            else:
+            if not os.path.exists(dest + r'/' + member) or not os.path.isfile(dest + r'/' + member):
                 tar.extract(member, dest)
         return tar.getnames()
     elif filename.endswith("tar"):
         tar = tarfile.open(filename, "r:")
         for member in tar.getnames():
-            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
-                print "ok"
-            else:
+            if not os.path.exists(dest + r'/' + member) or not os.path.isfile(dest + r'/' + member):
                 tar.extract(member, dest)
         return tar.getnames()
 
@@ -293,7 +282,6 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
             skip = md5Checker(path, md5Children)
             # skip = True -> Next child element
             if(skip):
-                print "Skip analysis"
                 continue
             else:
                 # Initialise invalid files trigger to False.
@@ -426,7 +414,7 @@ def main():
     "Contacts file path")
 
     parser.add_argument("-t", "--template", default = None, type = str, help = \
-    "Template file path")
+    "Template name")
     
     parser.add_argument("-p", dest = "pwd", type = str, help = "SMTP account password")
 
@@ -542,10 +530,9 @@ def main():
                         # Here we have to remove Nextcloud prefix and add temp prefix
                         removeNodeFromFS(extraction_path)
 
-                # TODO V: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
+                # TODO II: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
                 # THE SAME -> FN.
                 elif(result[0] == "invalidChild"):
-                    print "Invalid child"
                     blacklistCandidates = result[1]
                     childrenFiles_whitelist_temp = result[2]
                     childrenNodes = result[3]       
@@ -564,7 +551,7 @@ def main():
                     # WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
 
-                    # TODO II: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
+                    # TODO III: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
                     # EXTRACT GROUP FOLDER NAME FROM PATH AND COMPARE WITH MYCONTACTS.TXT FOR
                     # ASSIGNING A NEXTCLOUD FOLDER NAME ("TESTFOLDER", ...)
                     # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
@@ -608,7 +595,7 @@ def main():
                 else: 
                     # If invalid mimetype or extension, process data for sending an email to 
                     # group folder admin in a later stage.
-                    print "Invalid!"
+
                     # Extract the name of the group folder and build Nextcloud UI path.
                     file_user_elements = abs_file.split("/")[gf_elements_index+1:]
                     file_user_path = "/".join(file_user_elements)
@@ -650,42 +637,45 @@ def main():
     # Step IV: Send an email notifying user to check files. 
     # mycontacts.txt and message.txt files should be placed in the working directory.
     name, email, group = get_contacts(args.contacts) 
-    message_template = read_template(args.template)
+    #message_template = read_template(args.template)
 
     # Setting SMTP server up.
     s = smtplib.SMTP(host='mao.bsc.es', port=25)
     s.starttls()
     s.login(USER, PASSWORD)
 
-    # TODO III: BUILD A FUNCTION FOR EMAIL SENDING.
-    # TODO IV: IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
+    # TODO IV: BUILD A FUNCTION FOR EMAIL SENDING.
+    # TODO V:  IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
+
+    # Get the template.
+    env = Environment(loader=FileSystemLoader(os.path.dirname(os.path.abspath(__file__))))
+    template = env.get_template(args.template)
     # For each contact (group folder admin), send an specific email:
     for name, email, group in zip(name, email, group):
         user_file_str = ""
         send = False
         # Iterate through all suspicious files.
+        files_array = []
         for el in files_email:
             # Assign files to the specific group folder, and create an entry.
             if(group == el["group"]):
                 # send=True will trigger an email sending to the group folder admin.
                 send= True
-                user_file_str += "Group folder: " + el["group"] + ", " + "Path: " + el["path"] \
-                + ", " + "Status: " + el["status"] + ", " + "md5: " + el["md5"] + "\n" + "\n"
+                files_array.append(el)
         # Send an email only if group folder has any incidence.
         if(send):
-            msg = MIMEMultipart()       # create a message
             # Add either group folder admin name and blacklisted files into the email template
-            message = message_template.substitute(PERSON_NAME=name.title(),FILES_LIST=user_file_str)
-            # setup the parameters of the message
+            message = template.render(files=files_array, name=name)
+            # Create message.
+            msg = MIMEMultipart() 
+            # Parameters.    
             msg['From']=MY_ADDRESS
             msg['To']=email
             msg['Subject']="iPC Nextcloud: File warning"
             #msg.add_header('reply-to', "support.ipc-project.bsc.es")
-
             # Attach email template into the message body
-            msg.attach(MIMEText(message, 'plain'))
-        
-            # send the message via the server set up earlier.
+            msg.attach(MIMEText(message, "html"))
+            # Send the message.
             # The following command works in Python 3: s.send_message(msg)
             # This is an attempt in Python 2.7
             s.sendmail(msg['FROM'], msg['To'], str(msg))
