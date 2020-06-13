@@ -1,14 +1,52 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>   
-    <title> iPC Nextcloud : File warning </title>  
+<head>  
+    <style type="text/css">
+        .title {
+            color: #75B9BE;
+        }
+        .hidden {
+            overflow: hidden;
+            text-align: left;
+        }
+        table {
+            border: 1px solid #eee;
+            border-radius: 5px !important;
+        }
+        table th {
+            background-color: #CAD461;
+            font-size: 1.2em;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            text-align: center;
+        }
+        table td {
+            font-size: 0.75em;
+            letter-spacing: .1em;
+        }
+    </style>
 </head>
 <body>
-    <h5> Dear {{ name }} </h5>
+    <h1 class="title"> iPC Nextcloud : File warning </h1>  
+    <h3> Dear {{ name }}, </h3>
     <p> Some of the contents uploaded into your group folder are suspicious and/or inappropriate. </p>
-    <p> Please, delete them or send us an email to support.ipc-project@bsc.es in case they are valid. </p>
-    <h5>Files list:</h5>
-    <div id="content">{% block content %}{% endblock %}</div> 
+    <p> Please, delete them or send us an email to <span style="color:#75B9BE"> support.ipc-project@bsc.es </span> in case they are valid. </p>
+    <div class="hidden">
+        <table>
+            <thead>
+                <tr>
+                    <th>Group</th>
+                    <th>Path</th> 
+                    <th>Status</th>
+                    <th>md5</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% block content %}{% endblock %}
+            </tbody>
+        </table>
+    </div>
+    <br/>
     <p> Best regards, </p>
     <p> iPC Nextcloud Team </p>
 </body>

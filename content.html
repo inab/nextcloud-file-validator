@@ -1,11 +1,11 @@
 {% extends "message.html" %}
 {% block content %}
-    <ul>
-      {% for element in files %}
-      <li> Group: {{ element['group']}}</li>
-      <li> Path: {{ element['path']}}</li>
-      <li> Status: {{ element['status']}}</li>
-      <li> md5: {{ element['md5']}}</li>
-      {% endfor %}
-    </ul>
+{% for element in files %}
+    <tr>
+        <td> {{ element['group']}} </td>
+        <td> {{ element['path']}} </td>
+        <td> {{ element['status']}} </td>
+        <td> {{ element['md5']}} </td>
+    </tr>
+{% endfor %}
 {% endblock %}
