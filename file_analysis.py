@@ -4,7 +4,8 @@
 
 # python file_analysis_salva.py -d /data/nextcloud/data/__groupfolders 
 # --exclude /data/nextcloud/data/__groupfolders/versions /data/nextcloud/data/__groupfolders/trash 
-# -o output -rw root_whitelist.txt -cw children_whitelist.txt -b blacklist.tsv -c mycontacts.txt -t message.txt -p *****
+# -o output -rw root_whitelist.txt -cw children_whitelist.txt -b blacklist.tsv -c mycontacts.txt 
+# -t message.txt -p ***** -ho hostname -u username -a address 
 
 import smtplib
 from string import Template
@@ -141,9 +142,7 @@ def md5Checker(fname, childrenMD5):
 def extractZip(filename, dest):
     with ZipFile(filename, 'r') as z:
         for member in z.namelist():
-            if os.path.exists(dest + r'/' + member) or os.path.isfile(dest + r'/' + member):
-                print "Skip extraction step"
-            else:
+            if not os.path.exists(dest + r'/' + member) or not os.path.isfile(dest + r'/' + member):
                 z.extract(member, dest)
     return z.namelist()
 
@@ -195,6 +194,22 @@ def getExtension(filename):
         else:
             extension = extension[-1]
     return extension
+
+def sendEmail(message, _from, _to, session):
+    # Create message.
+    msg = MIMEMultipart() 
+    # Parameters.    
+    msg['From']=_from
+    msg['To']=_to
+    msg['Subject']="iPC Nextcloud: File warning"
+    #msg.add_header('reply-to', "support.ipc-project.bsc.es")
+    # Attach email template into the message body
+    msg.attach(MIMEText(message, "html"))
+    # Send the message.
+    # The following command works in Python 3: s.send_message(msg)
+    # This is an attempt in Python 2.7
+    session.sendmail(msg['FROM'], msg['To'], str(msg))
+    del msg
 
 def nodeGenerator(absPath, relPath, prefix, multiple, filetype, nodeList):
     # Check if this file comes from the root group folder. Not extracted yet.
@@ -418,12 +433,13 @@ def main():
     
     parser.add_argument("-p", dest = "pwd", type = str, help = "SMTP account password")
 
-    args = parser.parse_args()
+    parser.add_argument("-u", dest = "user", type = str, help = "SMTP account user")
 
-    # SMTP server credentials.
-    USER = "admin_ipc-project@bsc.es"
-    MY_ADDRESS = 'support.ipc-project@bsc.es'
-    PASSWORD = args.pwd
+    parser.add_argument("-a", dest = "address", type = str, help = "SMTP account 'from' address")
+
+    parser.add_argument("-ho", dest = "host", type = str, help = "SMTP account host")
+
+    args = parser.parse_args()
 
     # Save path to root folder/s if exists.
     folders = []
@@ -637,19 +653,22 @@ def main():
     # Step IV: Send an email notifying user to check files. 
     # mycontacts.txt and message.txt files should be placed in the working directory.
     name, email, group = get_contacts(args.contacts) 
-    #message_template = read_template(args.template)
 
-    # Setting SMTP server up.
-    s = smtplib.SMTP(host='mao.bsc.es', port=25)
+    # SMTP server credentials.
+    USER = args.user
+    MY_ADDRESS = args.address
+    PASSWORD = args.pwd
+    # SMTP login.
+    s = smtplib.SMTP(host=args.host, port=25)
     s.starttls()
     s.login(USER, PASSWORD)
 
-    # TODO IV: BUILD A FUNCTION FOR EMAIL SENDING.
-    # TODO V:  IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
+    # TODO IV:  IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
 
     # Get the template.
     env = Environment(loader=FileSystemLoader(os.path.dirname(os.path.abspath(__file__))))
     template = env.get_template(args.template)
+
     # For each contact (group folder admin), send an specific email:
     for name, email, group in zip(name, email, group):
         user_file_str = ""
@@ -663,23 +682,10 @@ def main():
                 send= True
                 files_array.append(el)
         # Send an email only if group folder has any incidence.
-        if(send):
+        if(send): 
             # Add either group folder admin name and blacklisted files into the email template
             message = template.render(files=files_array, name=name)
-            # Create message.
-            msg = MIMEMultipart() 
-            # Parameters.    
-            msg['From']=MY_ADDRESS
-            msg['To']=email
-            msg['Subject']="iPC Nextcloud: File warning"
-            #msg.add_header('reply-to', "support.ipc-project.bsc.es")
-            # Attach email template into the message body
-            msg.attach(MIMEText(message, "html"))
-            # Send the message.
-            # The following command works in Python 3: s.send_message(msg)
-            # This is an attempt in Python 2.7
-            s.sendmail(msg['FROM'], msg['To'], str(msg))
-            del msg
+            sendEmail(message, MY_ADDRESS, email, s)
     # Terminate the SMTP session and close the connection.
     s.quit()
 
