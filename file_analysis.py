@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # https://github.com/ahupp/python-magic
 
 # Execution example
@@ -6,6 +7,8 @@
 # --exclude /data/nextcloud/data/__groupfolders/versions /data/nextcloud/data/__groupfolders/trash 
 # -o output -rw root_whitelist.txt -cw children_whitelist.txt -b blacklist.tsv -c mycontacts.txt 
 # -t message.txt -p ***** -ho hostname -u username -a address 
+
+from __future__ import print_function
 
 import smtplib
 from string import Template
@@ -17,7 +20,6 @@ import os
 import sys
 import stat
 import argparse
-from string import strip
 from hashlib import md5
 import csv
 import tarfile
@@ -445,8 +447,7 @@ def main():
     folders = []
     for root_folder in args.root:
         if not os.path.isdir(os.path.abspath(root_folder)):
-            print >> sys.stderr, ("WARNING: Input root folder '%s' should exist") \
-            % (root_folder)
+            print("WARNING: Input root folder '%s' should exist" % (root_folder), file=sys.stderr)
         else:
             folders.append(os.path.abspath(root_folder))
 
@@ -458,8 +459,7 @@ def main():
     toExclude = []
     for folder in args.exclude:
         if not os.path.isdir(os.path.abspath(folder)):
-            print >> sys.stderr, ("WARNING: Excluded folder '%s' should exist") \
-            % (folder)
+            print("WARNING: Excluded folder '%s' should exist" % (folder), file=sys.stderr)
         else:
             toExclude.append(os.path.abspath(folder))
 
@@ -483,7 +483,7 @@ def main():
 
     	    ## Just exclude any folder below: 
             if ref in toExclude:
-		        dirs[:] = []
+                dirs[:] = []
       
             # Get all files from dir.
             for relative_file in files:
@@ -496,7 +496,7 @@ def main():
                 files_path_md5.setdefault(file_md5, set()).add(abs_file) 
                 n +=1
 
-    print >> sys.stderr, ("\r%d processed files") % (n)
+    print("\r%d processed files" % (n), file=sys.stderr)
     sys.stderr.flush()
 
     # Step II: Check all extensions and mimetypes.
