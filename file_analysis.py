@@ -61,7 +61,7 @@ def update_whitelist(path, md5_whitelist):
             out_file.write(md5 + "\n") 
     out_file.close()
 
-def read_whitelist(path):
+def read_md5(path):
     md5 = []
     with open(path, "r") as md5file:  
         for row in md5file:
@@ -83,9 +83,8 @@ def update_blacklist(path, current_blacklist, previous_blacklist):
     with open(path, 'w') as out_file:
         tsv_writer = csv.writer(out_file, delimiter='\t')
         # Columns name definition.
-        tsv_writer.writerow(['md5', "group", 'path', 'extension', 'mimetype', 'status'])
+        tsv_writer.writerow(['md5', "group", 'path', 'extension', 'mimetype', 'status', 'rootFolder'])
         # Here we set the status for elements in the current blacklist.
-
         for file in current_blacklist:
             present = False
             for el in previous_blacklist:
@@ -93,8 +92,8 @@ def update_blacklist(path, current_blacklist, previous_blacklist):
                     # If status is not valid (previous_blacklist) write it in registry
                     # for the next script execution.
                     if(el["status"] != "Valid"):
-                        tsv_writer.writerow([file["md5"], file["group"], file["path"], 
-                        file["extension"], file["mimetype"], file["status"]])
+                        tsv_writer.writerow([ file["md5"], file["group"], file["path"], 
+                        file["extension"], file["mimetype"], file["status"], file["rootFolder"] ])
                         present = True
                         # email doesn't include mimetype/extension. status field should
                         # explain why that file is not valid.
@@ -111,8 +110,8 @@ def update_blacklist(path, current_blacklist, previous_blacklist):
                         break
             # If md5 is new (present = False), write it in registry for the next script exec.
             if not present:
-                tsv_writer.writerow([file["md5"], file["group"], file["path"], 
-                    file["extension"], file["mimetype"], file["status"]])
+                tsv_writer.writerow([ file["md5"], file["group"], file["path"], 
+                    file["extension"], file["mimetype"], file["status"], file["rootFolder"] ])
                 files_email.append({
                     "group" : file["group"],
                     "path" : file["path"],
@@ -151,6 +150,7 @@ def extractZip(filename, dest):
 def extractGzip(filename, dest, block_size=65536):
     directory = dest.split("/")[:-1]
     directory = "/".join(directory)
+
     if(not os.path.exists(directory)):
         os.makedirs(directory)
 
@@ -293,6 +293,7 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
                 array = [dest, f]
                 path = "/".join(array)
                 inner=True
+
         # Check if it's a file. 
         if(os.path.isfile(path)):
             # SKIP ANALYSIS? Check if the file md5 already exists into the file whitelist.
@@ -308,22 +309,24 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
                 mimetype = mime.from_file(path)
                 # b) Get file extension:
                 extension = getExtension(f)
+                # c) Initialize status:
+                status = ""
                 # Check extension:
                 if (extension in black_list):
                     # Invalid triggered. invalid=True.
                     invalid = True
-                    status = "%s: File extension not allowed" % extension
+                    status += "%s: File extension not allowed \n" % extension
                 # Check mimetype for valid extension.
-                elif (mimetype == "video/x-msvideo" or mimetype == "video/mp3"
+                if (mimetype == "video/x-msvideo" or mimetype == "video/mp3"
                     or mimetype == "audio/mpeg" or mimetype == "video/mp4" 
                     or mimetype == "video/mpeg" or mimetype == "video/dvd" 
                     or mimetype == "audio/wav" or mimetype == "video/webm" 
                     or mimetype == "video/x-ms-wmv"):
                     # Invalid triggered. invalid=True.
                     invalid = True
-                    status = "%s: File format not allowed" % mimetype
+                    status += "%s: File format not allowed \n" % mimetype
                 # Check if it is a zip file, only for valid extensions. Avoid xlsx (mimetype=application/zip).
-                elif (mimetype == "application/zip" and not extension == "xlsx"):
+                if (mimetype == "application/zip" and not extension == "xlsx"):
                     # Set filetype to "zip-kind" -> This zip will be added in nodeList queue,
                     # ready for extraction (filetype="zip-kind) once all files in the current 
                     # iteration are analysed. 
@@ -396,7 +399,7 @@ def analyseFiles(filename, dest, nodeList, filetype, inner, whitelistChild, inva
     if(len(nodeList) != 0):
         return analyseFiles(nodeList[0][0], nodeList[0][2], nodeList[1:], nodeList[0][1], inner, whitelistChild, invalidChild, childrenNodes, rootKind, md5Children)
     elif(len(invalidChild) !=0):
-        return ["invalidChild", invalidChild, whitelistChild, childrenNodes]
+        return ["invalidChild", "remove", invalidChild, whitelistChild, childrenNodes]
     else:
         return [True, rootKind]
 
@@ -501,12 +504,13 @@ def main():
 
     # Step II: Check all extensions and mimetypes.
 
-    # Open whitelists and load md5 into memory.
-    md5_root_checked = read_whitelist(args.rootWhite)
-    md5_children_checked = read_whitelist(args.childrenWhite)
+    # Load whitelist and blacklist md5's into memory and previous_blacklist.
+    md5_root_checked = read_md5(args.rootWhite)
+    md5_children_checked = read_md5(args.childrenWhite)
+    previous_blacklist = read_blacklist(args.black)
+    blacklist_folder = []
 
     # II.b. Analyze mimetypes for all the elements of files_path_md5.
-
     file_blacklist = []
     file_whitelist = []
     childrenFiles_whitelist = [] 
@@ -519,6 +523,7 @@ def main():
         # For each md5 with Valid status, skip the analysis.
         if(md5 in md5_root_checked):
             continue
+        skip = False
         # For each md5, extracts the value (set(['path']))
         for abs_file in files_path_md5[md5]:
             exists = os.path.exists(abs_file)
@@ -533,41 +538,44 @@ def main():
                 extension = getExtension(abs_file)
                 # rootKind init
                 rootKind = ""
-                # Main analysis fn.
-                result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], [], rootKind, md5_children_checked)
+                # For each md5 in previous blacklist, skip the analysis and send the report.
+                for el in previous_blacklist:
+                    if(md5 == el["md5"]):
+                        skip = True 
+                        result = [False, rootKind] 
+                        folder = el["rootFolder"]
+                        break
+                if(not skip):
+                    # Main analysis fn.
+                    result = analyseFiles(abs_file, group_prefix, [], "seed", False, [], [], [], rootKind, md5_children_checked)
                 
+                # Remove all extracted files from FS as we have now a md5_blacklist filter.
+                if(result[1] != ""):
+                    # Removing root files from FS.
+                    removeNodeFromFS(group_prefix)
+
                 if(len(result) == 2 and result[0] == True):
                     # Adding md5 if it's valid. 
                     file_whitelist.append(md5)
-                    # Removing root files from FS.
-                    if(result[1] != rootKind): 
-                        folder_name = file_name.split(".")[0]
-                        extraction_path = group_prefix + "/" + result[1] + "/" + folder_name
-                        # Here we have to remove Nextcloud prefix and add temp prefix
-                        removeNodeFromFS(extraction_path)
-
-                # TODO II: IMPROVE BLACKLIST ELEMENTS CREATION. ELIF AND ELSE DO PRETTY MUCH
-                # THE SAME -> FN.
+                    
                 elif(result[0] == "invalidChild"):
-                    blacklistCandidates = result[1]
-                    childrenFiles_whitelist_temp = result[2]
-                    childrenNodes = result[3]       
+                    blacklistCandidates = result[2]
+                    childrenFiles_whitelist_temp = result[3]
+                    childrenNodes = result[4] 
                     # Adding only MD5 from valid children files. Skip further analysis.
                     if(len(childrenFiles_whitelist_temp) != 0):  
                         for el in childrenFiles_whitelist_temp:
                             if (el[0] not in md5_children_checked):
                                 childrenFiles_whitelist.append(el[0])
                     # Adding childNode MD5 to the childrenFiles whitelist. Skip further analysis.
-                    # Removal from FS of valid childrenNodes. Disabled (Different strategy)
                     for el in childrenNodes:
-                        # removeNodeFromFS(el[1].split(".")[0])   REMOVAL FROM FS DISABLED!
                         if (el[0] not in md5_children_checked):
                             childrenFiles_whitelist.append(el[0])
 
                     # WE WON'T REMOVE EXTRACTED FILES FROM FS UNTIL ROOT FILE STATUS IS VALID. 
                     # AVOIDS TO REPEAT THE EXTRACTION STEP AGAIN IN ANALYSIS FN. 
 
-                    # TODO III: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
+                    # TODO II: ADD FS GROUP FOLDER NAME (1,2,3...) INTO MYCONTACTS.TXT ROWS.
                     # EXTRACT GROUP FOLDER NAME FROM PATH AND COMPARE WITH MYCONTACTS.TXT FOR
                     # ASSIGNING A NEXTCLOUD FOLDER NAME ("TESTFOLDER", ...)
                     # Mapping the group folders name in filesystem (1,2..) with Nextcloud 
@@ -582,13 +590,14 @@ def main():
                     file_user_elements = abs_file.split("/")[gf_elements_index+1:]
                     file_user_path = "/".join(file_user_elements)
                     status = "Invalid content within %s" % file_user_path
-                    blacklistCandidates.insert(0, (tuple((status, file_md5, extension, mimetype, file_user_path))))
-
+                    # Get root folder.
+                    file_user_elements = file_user_elements[-1].split(".")
+                    blacklistCandidates.insert(0, (tuple((status, md5, extension, mimetype, file_user_path))))
                     # CHILDS: GET EXTRACTION FOLDER PREFIX LEN.
                     prefix_len = len(group_prefix.split("/")) + 1
-                    
                     # REMOVE PREFIX FROM ABSOLUTE CHILD PATHS.
                     counter = 0
+
                     for el in blacklistCandidates:
                         # ROOT.
                         if(counter == 0):
@@ -599,16 +608,17 @@ def main():
                             file_user_elements = el[4].split("/")[prefix_len:]
                             rebuiltPath = "/".join(file_user_elements)
 
-                        # We create a dictionary array , representing invalid files.
+                        # We create a dictionary array, representing invalid files.
                         file_blacklist.append({ "md5" : el[1],
                                                 "group" : gf_element,
                                                 "path" : rebuiltPath,
                                                 "extension" : el[2],
                                                 "mimetype" : el[3],
-                                                "status" : el[0]
+                                                "status" : el[0],
+                                                "rootFolder" : file_user_elements[0]
                         })  
 
-                else: 
+                elif(not skip): 
                     # If invalid mimetype or extension, process data for sending an email to 
                     # group folder admin in a later stage.
 
@@ -630,8 +640,24 @@ def main():
                                             "path" : file_user_path,
                                             "extension" : extension,
                                             "mimetype" : mimetype,
-                                            "status" : result[1]
+                                            "status" : result[1],
+                                            "rootFolder" : file_user_elements[0]
                     })
+                else: # SKIP == TRUE
+                    # We create a dictionary array, including root and child skipped files.
+                    for el in previous_blacklist:
+                        if(folder == el["rootFolder"]):
+                            # In case we change root node status to Valid (even if child are "invalid")
+                            if(el["status"] == "Valid" and md5 not in file_whitelist):
+                                file_whitelist.append(md5)
+                            file_blacklist.append({ "md5" : el["md5"],
+                                                    "group" : el["group"],
+                                                    "path" : el["path"],
+                                                    "extension" : el["extension"],
+                                                    "mimetype" : el["mimetype"],
+                                                    "status" : el["status"],
+                                                    "rootFolder" : el["rootFolder"]
+                            })
 
     # Updating root nodes whitelist (already analised files) adding new Valid files.
     update_whitelist(args.rootWhite, file_whitelist)
@@ -642,8 +668,6 @@ def main():
 
     # Check the previous blacklist document, in case status field has changed.
     # We store in memory all entries in a dictionary array. 
-    previous_blacklist = read_blacklist(args.black)
-
     # Update blacklist an stores it in disk. 
     # Comparison between current and previous blacklist.
     # Write only elements with a non "Valid" status                                               
@@ -662,8 +686,6 @@ def main():
     s = smtplib.SMTP(host=args.host, port=25)
     s.starttls()
     s.login(USER, PASSWORD)
-
-    # TODO IV:  IMPROVE EMAIL TEMPLATE: ADD HTML/CSS.
 
     # Get the template.
     env = Environment(loader=FileSystemLoader(os.path.dirname(os.path.abspath(__file__))))
